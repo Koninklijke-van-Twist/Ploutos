@@ -1,8 +1,0 @@
-<FilesMatch "\.json$">
-    Require all denied
-</FilesMatch>
-
-AuthType Basic
-AuthName "Ploutos"
-AuthUserFile /var/www/html/ploutos/.htpasswd
-Require valid-user

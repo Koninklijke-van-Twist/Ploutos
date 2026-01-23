@@ -141,7 +141,7 @@ if (isset($_GET['api']) && $_GET['api'] === '1') {
         // de-dup op datum+naam
         $uniq = [];
         foreach ($rows as $r) {
-            $k = $r['date'] . "|" . mb_strtolower($r['name']);
+            $k = $r['date'] . "|" . strtolower($r['name']);
             $uniq[$k] = $r;
         }
         $rows = array_values($uniq);

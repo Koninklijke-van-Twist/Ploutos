@@ -1,6 +1,7 @@
 <?php
 require __DIR__ . "/odata.php";
 require __DIR__ . "/auth.php";
+require __DIR__ . "/logincheck.php";
 
 $hour = 3600;
 $day = $hour * 24;

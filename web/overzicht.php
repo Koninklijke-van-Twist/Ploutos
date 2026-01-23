@@ -97,24 +97,13 @@ foreach ($lines as $l) {
     if (!$weekStart)
         continue;
 
-    // Dagdatums (Ma..Zo) uit weekStart
-    $dates = [];
-    for ($d = 0; $d < 7; $d++)
-        $dates[$d] = ymd_add_days($weekStart, $d);
 
-    // Uren per dag (Field1..7)
-    $dayHours = [];
-    $weekTotal = 0;
-
-    for ($i = 1; $i <= 7; $i++) {
-        $dayHours[$i - 1] = (float) ($l["Field{$i}"] ?? 0);
-        $weekTotal += $dayHours[$i - 1];
-    }
 
     // Init struct
     if (!isset($byPerson[$personNo])) {
         $byPerson[$personNo] = ['personNo' => $personNo, 'name' => $name, 'weeks' => []];
     }
+
     if (!isset($byPerson[$personNo]['weeks'][$tsNo])) {
         // weeknummer uit Description (fallback)
         $desc = (string) ($tsByNo[$tsNo]['Description'] ?? '');
@@ -130,9 +119,22 @@ foreach ($lines as $l) {
             'p85' => 0,
             'onkosten' => 0.0,
             'verlet' => 0.0,
-            'weekTotaal' => $weekTotal
+            'weekTotaal' => 0,
+            'lines' => 0,
         ];
     }
+
+    // Uren per dag (Field1..7)
+    $dayHours = $byPerson[$personNo]['weeks'][$tsNo]['dayHours'] ?? [];
+    $weekTotal = (int) $byPerson[$personNo]['weeks'][$tsNo]['weekTotaal'] ?? 0;
+
+    for ($i = 1; $i <= 7; $i++) {
+        $dayHours[$i - 1] = ($dayHours[$i - 1] ?? 0) + (float) ($l["Field{$i}"] ?? 0);
+        $weekTotal += $dayHours[$i - 1];
+    }
+
+    $byPerson[$personNo]['weeks'][$tsNo]['weekTotaal'] = $weekTotal;
+    $byPerson[$personNo]['weeks'][$tsNo]['dayHours'] = $dayHours;
 
     // Onkosten / verlet (voorbeeld: via Work_Type_Code en Total_Quantity als bedrag)
     if (in_array($workType, $CODES_ONKOSTEN, true)) {
@@ -144,12 +146,26 @@ foreach ($lines as $l) {
         continue;
     }
 
-    // Premies verdelen per dag
-    for ($d = 0; $d < 7; $d++) {
-        $split = split_premiums_for_day($dayHours[$d], $dates[$d]);
-        $byPerson[$personNo]['weeks'][$tsNo]['p285'] += $split['p285'];
-        $byPerson[$personNo]['weeks'][$tsNo]['p47'] += $split['p47'];
-        $byPerson[$personNo]['weeks'][$tsNo]['p85'] += $split['p85'];
+    $byPerson[$personNo]['weeks'][$tsNo]['lines']++;
+}
+
+foreach ($byPerson as $pKey => $person) {
+    foreach ($person['weeks'] as $tsKey => $ts) {
+        // Dagdatums (Ma..Zo) uit weekStart
+        $dates = [];
+        for ($d = 0; $d < 7; $d++)
+            $dates[$d] = ymd_add_days($ts['weekStart'], $d);
+
+        $weekTotal = 0;
+        // Premies verdelen per dag
+        for ($d = 0; $d < 7; $d++) {
+            $weekTotal += $byPerson[$pKey]['weeks'][$tsKey]['dayHours'][$d];
+            $split = split_premiums_for_day($byPerson[$pKey]['weeks'][$tsKey]['dayHours'][$d], $dates[$d]);
+            $byPerson[$pKey]['weeks'][$tsKey]['p285'] += $split['p285'];
+            $byPerson[$pKey]['weeks'][$tsKey]['p47'] += $split['p47'];
+            $byPerson[$pKey]['weeks'][$tsKey]['p85'] += $split['p85'];
+        }
+        $byPerson[$pKey]['weeks'][$tsKey]["weekTotaal"] = $weekTotal;
     }
 }
 
@@ -325,7 +341,7 @@ function hhmm(int $min): string
                             <tr>
                                 <td>
                                     <a class="btn" href="<?= htmlspecialchars($inspectUrl) ?>">
-                                        <noprint>Bekijk</noprint>&nbsp;
+                                        <noprint>Bekijk <?= $w['lines'] ?></noprint>&nbsp;
                                     </a>
                                 </td>
                                 <td><?= (int) $w['weekNo'] ?> <span
@@ -340,15 +356,19 @@ function hhmm(int $min): string
                                 </td>
                                 <td></td>
                                 <td class="right <?= $w['p47'] == 0 ? "zeroTotal" : "" ?>">
-                                    <?= htmlspecialchars(hhmm((int) $w['p47'])) ?></td>
+                                    <?= htmlspecialchars(hhmm((int) $w['p47'])) ?>
+                                </td>
                                 <td></td>
                                 <td class="right <?= $w['p85'] == 0 ? "zeroTotal" : "" ?>">
-                                    <?= htmlspecialchars(hhmm((int) $w['p85'])) ?></td>
+                                    <?= htmlspecialchars(hhmm((int) $w['p85'])) ?>
+                                </td>
                                 <td></td>
                                 <td class="right <?= $w['onkosten'] == 0 ? "zeroTotal" : "" ?>">
-                                    <?= htmlspecialchars(eur((float) $w['onkosten'])) ?></td>
+                                    <?= htmlspecialchars(eur((float) $w['onkosten'])) ?>
+                                </td>
                                 <td class="right <?= $w['verlet'] == 0 ? "zeroTotal" : "" ?>">
-                                    <?= htmlspecialchars(eur((float) $w['verlet'])) ?></td>
+                                    <?= htmlspecialchars(eur((float) $w['verlet'])) ?>
+                                </td>
                             </tr>
                         <?php endforeach; ?>
                     </tbody>

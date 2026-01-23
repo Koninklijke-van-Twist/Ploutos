@@ -35,6 +35,11 @@ $year = substr($ts['Starting_Date'], 0, 4);
 $holidays = holiday_set($year);
 $isHoliday = isset($holidays[$ts['Starting_Date']]);
 
+function hhmm(float $hours): string
+{
+    return minutes_to_hhmm($hours * 60);
+}
+
 function dayIsHoliday($i)
 {
     global $ts;
@@ -176,7 +181,7 @@ function dayIsHoliday($i)
                     <?php foreach ($lines as $l): ?>
                         <tr>
                             <td>
-                                <?= (int) ($l['Line_No'] ?? 0) ?>
+                                <?= $l['Time_Sheet_No'] . "-" . ((int) ($l['Line_No'] ?? 0)) ?>
                             </td>
                             <td>
                                 <?= htmlspecialchars((string) ($l['Work_Type_Code'] ?? '')) ?>
@@ -193,11 +198,17 @@ function dayIsHoliday($i)
                             <?php for ($i = 1; $i <= 7; $i++): ?>
                                 <td <?= dayIsHoliday($i) ? "class=\"holiday\"" : "" ?>>
 
-                                    <?= htmlspecialchars((string) ($l["Field{$i}"] ?? '0')) . ($l['Work_Type_Code'] == "KM" ? " km" : "") ?>
+                                    <?= $l['Work_Type_Code'] == "KM" ?
+                                        htmlspecialchars((string) ($l["Field{$i}"] ?? '0')) . " km"
+                                        : htmlspecialchars((string) hhmm($l["Field{$i}"] ?? '0')) ?>
                                 </td>
                             <?php endfor; ?>
                             <td>
-                                <?= htmlspecialchars((string) ($l['Total_Quantity'] ?? '0')) . ($l['Work_Type_Code'] == "KM" ? " km" : "") ?>
+                                <b>
+                                    <?= $l['Work_Type_Code'] == "KM" ?
+                                        htmlspecialchars((string) ($l["Total_Quantity"] ?? '0')) . " km"
+                                        : htmlspecialchars((string) hhmm($l["Total_Quantity"] ?? '0')) ?>
+                                </b>
                             </td>
                         </tr>
                     <?php endforeach; ?>

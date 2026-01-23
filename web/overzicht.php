@@ -190,14 +190,28 @@ function hhmm(int $min): string
             margin: 0;
         }
 
+        h2 {
+            background-color: #e4ecf8;
+            background-image: url("images/kvtlogo.png");
+            background-size: contain;
+            background-repeat: no-repeat;
+            background-position: right;
+            border-radius: 16px;
+            padding: 5px;
+        }
+
         .wrap {
             max-width: 1200px;
             margin: 24px auto;
             padding: 0 16px
         }
 
+        table {
+            background-color: #fff;
+        }
+
         .card {
-            background: #fff;
+            background-color: #e4ecf8;
             border: 1px solid #e2e8f0;
             border-radius: 16px;
             padding: 18px;
@@ -236,6 +250,11 @@ function hhmm(int $min): string
 
         .muted {
             color: #64748b
+        }
+
+        .zeroTotal {
+
+            color: #c7d1e0
         }
 
         .btn {
@@ -313,31 +332,42 @@ function hhmm(int $min): string
                                         class="muted">(<?= htmlspecialchars($w['weekStart']) ?>)</span></td>
                                 <td><?= $i ?></td>
 
-                                <td>
+                                <td <?= hhmm($w['weekTotaal'] * 60) == "0:00" ? "class=\"zeroTotal\"" : "" ?>>
                                     <?= hhmm($w['weekTotaal'] * 60) ?>
                                 </td>
-                                <td class="right"><?= htmlspecialchars(hhmm((int) $w['p285'])) ?></td>
+                                <td class="right <?= $w['p285'] == 0 ? "zeroTotal" : "" ?>">
+                                    <?= htmlspecialchars(hhmm((int) $w['p285'])) ?>
+                                </td>
                                 <td></td>
-                                <td class="right"><?= htmlspecialchars(hhmm((int) $w['p47'])) ?></td>
+                                <td class="right <?= $w['p47'] == 0 ? "zeroTotal" : "" ?>">
+                                    <?= htmlspecialchars(hhmm((int) $w['p47'])) ?></td>
                                 <td></td>
-                                <td class="right"><?= htmlspecialchars(hhmm((int) $w['p85'])) ?></td>
+                                <td class="right <?= $w['p85'] == 0 ? "zeroTotal" : "" ?>">
+                                    <?= htmlspecialchars(hhmm((int) $w['p85'])) ?></td>
                                 <td></td>
-                                <td class="right"><?= htmlspecialchars(eur((float) $w['onkosten'])) ?></td>
-                                <td class="right"><?= htmlspecialchars(eur((float) $w['verlet'])) ?></td>
+                                <td class="right <?= $w['onkosten'] == 0 ? "zeroTotal" : "" ?>">
+                                    <?= htmlspecialchars(eur((float) $w['onkosten'])) ?></td>
+                                <td class="right <?= $w['verlet'] == 0 ? "zeroTotal" : "" ?>">
+                                    <?= htmlspecialchars(eur((float) $w['verlet'])) ?></td>
                             </tr>
                         <?php endforeach; ?>
                     </tbody>
                     <tfoot>
                         <tr>
                             <td colspan="4">Totalen</td>
-                            <td class="right"><?= htmlspecialchars(hhmm($tot285)) ?></td>
+                            <td class="right <?= $tot285 == 0 ? "zeroTotal" : "" ?>"><?= htmlspecialchars(hhmm($tot285)) ?>
+                            </td>
                             <td></td>
-                            <td class="right"><?= htmlspecialchars(hhmm($tot47)) ?></td>
+                            <td class="right <?= $tot47 == 0 ? "zeroTotal" : "" ?>"><?= htmlspecialchars(hhmm($tot47)) ?>
+                            </td>
                             <td></td>
-                            <td class="right"><?= htmlspecialchars(hhmm($tot85)) ?></td>
+                            <td class="right <?= $tot85 == 0 ? "zeroTotal" : "" ?>"><?= htmlspecialchars(hhmm($tot85)) ?>
+                            </td>
                             <td></td>
-                            <td class="right"><?= htmlspecialchars(eur($totOnk)) ?></td>
-                            <td class="right"><?= htmlspecialchars(eur($totVer)) ?></td>
+                            <td class="right <?= $totOnk == 0 ? "zeroTotal" : "" ?>"><?= htmlspecialchars(eur($totOnk)) ?>
+                            </td>
+                            <td class="right <?= $totVer == 0 ? "zeroTotal" : "" ?>"><?= htmlspecialchars(eur($totVer)) ?>
+                            </td>
                         </tr>
                     </tfoot>
                 </table>

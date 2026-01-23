@@ -60,6 +60,18 @@ function dayIsHoliday($i)
             }
         }
 
+
+
+        h1 {
+            background-color: #e4ecf8;
+            background-image: url("images/kvtlogo.png");
+            background-size: contain;
+            background-repeat: no-repeat;
+            background-position: right;
+            border-radius: 16px;
+            padding: 5px;
+        }
+
         body {
             font-family: system-ui, Segoe UI, Arial;
             margin: 0;
@@ -81,8 +93,12 @@ function dayIsHoliday($i)
             padding: 0 16px
         }
 
+        table {
+            background-color: #fff;
+        }
+
         .card {
-            background: #fff;
+            background-color: #e4ecf8;
             border: 1px solid #e2e8f0;
             border-radius: 16px;
             padding: 18px

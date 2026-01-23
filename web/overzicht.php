@@ -188,7 +188,6 @@ function hhmm(int $min): string
         body {
             font-family: system-ui, Segoe UI, Arial;
             margin: 0;
-            background: #f6f7fb
         }
 
         .wrap {
@@ -259,7 +258,9 @@ function hhmm(int $min): string
     <div class="wrap">
         <noprint><a href="feestdagen.php">Beheer Feestdagen</a></noprint>
         <h1>Overzicht <?= htmlspecialchars($from) ?> t/m <?= htmlspecialchars($to) ?></h1>
-        <div class="muted">Klik op een week om details te bekijken.</div>
+        <noprint>
+            <div class="muted">Klik op een week om details te bekijken.</div>
+        </noprint>
 
         <?php foreach ($byPerson as $person): ?>
             <div class="card">

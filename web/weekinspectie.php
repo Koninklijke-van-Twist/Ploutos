@@ -1,6 +1,7 @@
 <?php
 require __DIR__ . "/odata.php";
 require __DIR__ . "/auth.php";
+require __DIR__ . "/lib_times.php";
 
 $tsNo = trim((string) ($_GET['tsNo'] ?? ''));
 $resourceNo = trim((string) ($_GET['resourceNo'] ?? ''));
@@ -30,6 +31,20 @@ $lines = array_values(array_filter($linesAll, function ($l) use ($resourceNo) {
     return (string) ($l['Header_Resource_No'] ?? '') === $resourceNo;
 }));
 
+$year = substr($ts['Starting_Date'], 0, 4);
+$holidays = holiday_set($year);
+$isHoliday = isset($holidays[$ts['Starting_Date']]);
+
+function dayIsHoliday($i)
+{
+    global $ts;
+    $d = $i - 1;
+    $date = date('Y-m-d', strtotime($ts['Starting_Date'] . " + {$d} days"));
+    $year = substr($date, 0, 4);
+    $holidays = holiday_set($year);
+    return isset($holidays[$date]);
+}
+
 ?>
 <!doctype html>
 <html lang="nl">
@@ -39,10 +54,25 @@ $lines = array_values(array_filter($linesAll, function ($l) use ($resourceNo) {
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Weekinspectie</title>
     <style>
+        @media print {
+            noprint {
+                display: none !important;
+            }
+        }
+
         body {
             font-family: system-ui, Segoe UI, Arial;
             margin: 0;
-            background: #f6f7fb
+        }
+
+        .holiday {
+            background-image: url("images/ballonnen.png");
+            background-size: contain;
+            background-repeat: no-repeat;
+            background-position: center;
+            color: #FFFFFF;
+            font-weight: bold;
+            text-shadow: -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000;
         }
 
         .wrap {
@@ -68,7 +98,8 @@ $lines = array_values(array_filter($linesAll, function ($l) use ($resourceNo) {
         td {
             border-bottom: 1px solid #e2e8f0;
             padding: 8px 10px;
-            font-size: 13px
+            font-size: 13px;
+            text-align: center;
         }
 
         th {
@@ -94,7 +125,7 @@ $lines = array_values(array_filter($linesAll, function ($l) use ($resourceNo) {
 
 <body>
     <div class="wrap">
-        <a class="btn" href="javascript:history.back()">← Terug</a>
+        <noprint><a class="btn" href="javascript:history.back()">← Terug</a></noprint>
 
         <div class="card" style="margin-top:12px;">
             <h1 style="margin:0 0 6px;">Weekinspectie</h1>
@@ -144,7 +175,8 @@ $lines = array_values(array_filter($linesAll, function ($l) use ($resourceNo) {
                                 <?= htmlspecialchars((string) ($l['Job_Task_No'] ?? '')) ?>
                             </td>
                             <?php for ($i = 1; $i <= 7; $i++): ?>
-                                <td>
+                                <td <?= dayIsHoliday($i) ? "class=\"holiday\"" : "" ?>>
+
                                     <?= htmlspecialchars((string) ($l["Field{$i}"] ?? '0')) . ($l['Work_Type_Code'] == "KM" ? " km" : "") ?>
                                 </td>
                             <?php endfor; ?>

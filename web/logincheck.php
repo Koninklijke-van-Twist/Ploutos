@@ -6,14 +6,14 @@ function is_localhost(): bool
 }
 
 if (!is_localhost()) {
-    require __DIR__ . "../login/lib.php";
+    require __DIR__ . "/../login/lib.php";
 
     if (
         !array_any($allowedUsers, function ($email) {
-            return $email == $_SESSION['user'];
+            return $email == $_SESSION['user']['email'];
         })
     ) {
-        require __DIR__ . "../login/403.php";
+        require __DIR__ . "/../login/403.php";
         die();
     }
 }

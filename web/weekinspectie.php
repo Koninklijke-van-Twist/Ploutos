@@ -2,6 +2,7 @@
 require __DIR__ . "/odata.php";
 require __DIR__ . "/auth.php";
 require __DIR__ . "/lib_times.php";
+require __DIR__ . "/logincheck.php";
 
 $tsNo = trim((string) ($_GET['tsNo'] ?? ''));
 $resourceNo = trim((string) ($_GET['resourceNo'] ?? ''));
@@ -142,6 +143,11 @@ function dayIsHoliday($i)
             background: #fff
         }
     </style>
+    <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
+    <link rel="icon" type="image/png" sizes="32x32" href="favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="favicon-16x16.png">
+    <link rel="manifest" href="site.webmanifest">
+    </body>
 </head>
 
 <body>

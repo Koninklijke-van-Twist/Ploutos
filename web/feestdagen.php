@@ -3,6 +3,7 @@
 // Slaat op als feestdagen_JAARTAL.json in dezelfde directory.
 
 declare(strict_types=1);
+require __DIR__ . "/logincheck.php";
 
 // -------------------- Config --------------------
 $storageDir = __DIR__ . "/feestdagen";

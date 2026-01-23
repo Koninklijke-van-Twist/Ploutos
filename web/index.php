@@ -34,6 +34,12 @@ rsort($monthList); // nieuwste eerst
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Selectie</title>
     <style>
+        @media print {
+            noprint {
+                display: none !important;
+            }
+        }
+
         body {
             font-family: system-ui, Segoe UI, Arial;
             margin: 0;
@@ -96,6 +102,7 @@ rsort($monthList); // nieuwste eerst
 
 <body>
     <div class="wrap">
+        <noprint><a href="feestdagen.php">Beheer Feestdagen</a></noprint>
         <h1>Overzicht genereren</h1>
         <p class="hint">Kies een maand, of geef een periode op.</p>
 

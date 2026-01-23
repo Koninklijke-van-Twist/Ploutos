@@ -257,6 +257,7 @@ function hhmm(int $min): string
 
 <body>
     <div class="wrap">
+        <noprint><a href="feestdagen.php">Beheer Feestdagen</a></noprint>
         <h1>Overzicht <?= htmlspecialchars($from) ?> t/m <?= htmlspecialchars($to) ?></h1>
         <div class="muted">Klik op een week om details te bekijken.</div>
 

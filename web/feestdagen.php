@@ -3,6 +3,7 @@
 // Slaat op als feestdagen_JAARTAL.json in dezelfde directory.
 
 declare(strict_types=1);
+require __DIR__ . "/auth.php";
 require __DIR__ . "/logincheck.php";
 
 // -------------------- Config --------------------
@@ -388,17 +389,16 @@ $defaultYear = (new DateTimeImmutable("now"))->format("Y");
 
             <div class="topbar">
                 <div class="left">
-                    <select id="yearSelect">
-                        <?php
-                        $y0 = (int) $defaultYear - 5;
-                        $y1 = (int) $defaultYear + 5;
-                        for ($y = $y1; $y >= $y0; $y--) {
-                            $sel = ((string) $y === $defaultYear) ? "selected" : "";
-                            echo "<option value=\"" . htmlspecialchars((string) $y) . "\" $sel>" . htmlspecialchars((string) $y) . "</option>";
-                        }
-                        ?>
-                    </select>
-                    <button class="btn" id="reloadBtn" type="button">Verversen</button>
+                    <select id="yearSelect"> <?php
+                    $y0 = (int) $defaultYear - 5;
+                    $y1 = (int) $defaultYear + 5;
+                    for ($y = $y1; $y >= $y0; $y--) {
+                        $sel = ((string) $y === $defaultYear) ? "selected" : "";
+                        echo "<option value=\"" . htmlspecialchars((string) $y) . "\" $sel>" . htmlspecialchars((string) $y) . "</option>";
+                    }
+                    ?>
+                        </select>
+                        <button class="btn" id="reloadBtn" type="button">Verversen</button>
                 </div>
                 <button class="btn btn-primary" id="addBtn" type="button">+ Feestdag</button>
             </div>

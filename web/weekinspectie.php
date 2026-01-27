@@ -173,6 +173,7 @@ function dayIsHoliday($i)
                         <th>Omschrijving</th>
                         <th>Project</th>
                         <th>Task</th>
+                        <th>Status</th>
                         <th>Ma</th>
                         <th>Di</th>
                         <th>Wo</th>
@@ -200,6 +201,9 @@ function dayIsHoliday($i)
                             </td>
                             <td>
                                 <?= htmlspecialchars((string) ($l['Job_Task_No'] ?? '')) ?>
+                            </td>
+                            <td>
+                                <?= htmlspecialchars((string) ($l['Status'] ?? '')) ?>
                             </td>
                             <?php for ($i = 1; $i <= 7; $i++): ?>
                                 <td <?= dayIsHoliday($i) ? "class=\"holiday\"" : "" ?>>

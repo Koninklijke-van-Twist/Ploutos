@@ -68,7 +68,7 @@ function holiday_set($year): array
  *
  * Retourneert minuten: ['p285'=>..., 'p47'=>..., 'p85'=>...]
  */
-function split_premiums_for_day(float $hours, string $dateYmd): array
+function split_premiums_for_day(float $hours, string $dateYmd, string $workType): array
 {
   $minutes = hours_to_minutes($hours);
   if ($minutes <= 0)
@@ -81,14 +81,19 @@ function split_premiums_for_day(float $hours, string $dateYmd): array
 
   $isHoliday = isset($holidays[$dateYmd]);
 
-  // Feestdag: alles 85
-  if ($isHoliday || $dow === 7) {
+  // Feestdag/zondag: alles 85
+  if ($isHoliday || $dow === 7 || $workType === "SOT200") {
     return ['p285' => 0, 'p47' => 0, 'p85' => $minutes];
   }
 
   // Zaterdag: alles 47
-  if ($dow === 6) {
+  if ($dow === 6 || $workType === "SOT150") {
     return ['p285' => 0, 'p47' => $minutes, 'p85' => 0];
+  }
+
+  if($workType === "SOT125")
+  {
+    return ['p285' => $minutes, 'p47' => 0, 'p85' => 0];
   }
 
   // Ma–Vr

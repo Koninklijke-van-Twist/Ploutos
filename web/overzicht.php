@@ -161,7 +161,7 @@ foreach ($byPerson as $pKey => $person) {
         // Premies verdelen per dag
         for ($d = 0; $d < 7; $d++) {
             $weekTotal += $byPerson[$pKey]['weeks'][$tsKey]['dayHours'][$d];
-            $split = split_premiums_for_day($byPerson[$pKey]['weeks'][$tsKey]['dayHours'][$d], $dates[$d]);
+            $split = split_premiums_for_day($byPerson[$pKey]['weeks'][$tsKey]['dayHours'][$d], $dates[$d], $workType);
             $byPerson[$pKey]['weeks'][$tsKey]['p285'] += $split['p285'];
             $byPerson[$pKey]['weeks'][$tsKey]['p47'] += $split['p47'];
             $byPerson[$pKey]['weeks'][$tsKey]['p85'] += $split['p85'];

@@ -98,8 +98,6 @@ foreach ($lines as $l) {
     if (!$weekStart)
         continue;
 
-
-
     // Init struct
     if (!isset($byPerson[$personNo])) {
         $byPerson[$personNo] = ['personNo' => $personNo, 'name' => $name, 'weeks' => []];
@@ -120,21 +118,26 @@ foreach ($lines as $l) {
             'p85' => 0,
             'onkosten' => 0.0,
             'verlet' => 0.0,
-            'weekTotaal' => 0,
-            'lines' => 0,
+            'lines' => 0
         ];
     }
 
     // Uren per dag (Field1..7)
     $dayHours = $byPerson[$personNo]['weeks'][$tsNo]['dayHours'] ?? [];
-    $weekTotal = (int) $byPerson[$personNo]['weeks'][$tsNo]['weekTotaal'] ?? 0;
+
+    $workType = (string) ($l['Work_Type_Code'] ?? '');
 
     for ($i = 1; $i <= 7; $i++) {
-        $dayHours[$i - 1] = ($dayHours[$i - 1] ?? 0) + (float) ($l["Field{$i}"] ?? 0);
-        $weekTotal += $dayHours[$i - 1];
+        if ($workType === 'SOT125')
+            $byPerson[$personNo]['weeks'][$tsNo]['p285'] += $l["Field{$i}"] * 60;
+        else if ($workType === 'SOT150')
+            $byPerson[$personNo]['weeks'][$tsNo]['p47'] += $l["Field{$i}"] * 60;
+        else if ($workType === 'SOT200')
+            $byPerson[$personNo]['weeks'][$tsNo]['p85'] += $l["Field{$i}"] * 60;
+        else
+            $dayHours[$i - 1] = ($dayHours[$i - 1] ?? 0) + (float) ($l["Field{$i}"] ?? 0);
     }
 
-    $byPerson[$personNo]['weeks'][$tsNo]['weekTotaal'] = $weekTotal;
     $byPerson[$personNo]['weeks'][$tsNo]['dayHours'] = $dayHours;
 
     // Onkosten / verlet (voorbeeld: via Work_Type_Code en Total_Quantity als bedrag)
@@ -157,11 +160,11 @@ foreach ($byPerson as $pKey => $person) {
         for ($d = 0; $d < 7; $d++)
             $dates[$d] = ymd_add_days($ts['weekStart'], $d);
 
-        $weekTotal = 0;
+        $weekTotal = ($byPerson[$pKey]['weeks'][$tsKey]['p285'] / 60) + ($byPerson[$pKey]['weeks'][$tsKey]['p47'] / 60) + ($byPerson[$pKey]['weeks'][$tsKey]['p85'] / 60);
         // Premies verdelen per dag
         for ($d = 0; $d < 7; $d++) {
-            $weekTotal += $byPerson[$pKey]['weeks'][$tsKey]['dayHours'][$d];
-            $split = split_premiums_for_day($byPerson[$pKey]['weeks'][$tsKey]['dayHours'][$d], $dates[$d], $workType);
+            $weekTotal += +$byPerson[$pKey]['weeks'][$tsKey]['dayHours'][$d];
+            $split = split_premiums_for_day($byPerson[$pKey]['weeks'][$tsKey]['dayHours'][$d], $dates[$d]);
             $byPerson[$pKey]['weeks'][$tsKey]['p285'] += $split['p285'];
             $byPerson[$pKey]['weeks'][$tsKey]['p47'] += $split['p47'];
             $byPerson[$pKey]['weeks'][$tsKey]['p85'] += $split['p85'];

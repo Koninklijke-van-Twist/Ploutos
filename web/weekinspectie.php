@@ -23,10 +23,12 @@ $url = $base . "Urenstaatregels?\$select="
     . "Time_Sheet_No,Line_No,Header_Resource_No,Header_Starting_Date,Header_Ending_Date,"
     . "Type,Status,Description,Job_No,Job_Task_No,Cause_of_Absence_Code,Chargeable,Work_Type_Code,"
     . "Service_Order_No,Assembly_Order_No,Archived,"
-    . "Field1,Field2,Field3,Field4,Field5,Field6,Field7,Total_Quantity"
+    . "Field1,Field2,Field3,Field4,Field5,Field6,Field7,Total_Quantity" //monday, tuesday, wednesday, thursday, friday, saturday, sunday
     . "&\$filter={$filter}&\$format=json";
 
 $linesAll = odata_get_all($url, $auth, 300);
+
+//todo: fetch first starting date and last ending date
 
 // 2) filter lokaal op persoon
 $lines = array_values(array_filter($linesAll, function ($l) use ($resourceNo) {
@@ -38,11 +40,22 @@ $year = substr($ts['Starting_Date'], 0, 4);
 $allProjects = array_unique(array_filter(array_column($lines, 'Job_Task_No')));
 
 $webfleetLines = [];
+$startDate = $ts['Starting_Date'];
+$endDate = $ts['Ending_Date'];
+
 foreach ($allProjects as $project) {
     $wfFilter = rawurlencode("LVS_Work_Order_No eq '" . str_replace("'", "''", $project) . "'");
-    $wfUrl = $base . "WebfleetHours?\$select=LVS_Work_Order_No,KVT_Date_Webfleet_Activity,KVT_Actual_Start_Time_Webfleet_Act,KVT_Actual_End_Time_Webfleet_Act,KVT_Pause,Work_Type_Code&\$filter={$wfFilter}&\$format=json";
-    $wf = (odata_get_all($wfUrl, $auth, 300)[0] ?? null);
-    $webfleetLines[] = $wf;
+    $wfUrl = $base . "WebfleetHours?\$select=LVS_Work_Order_No,KVT_Date_Webfleet_Activity,KVT_Start_time_Webfleet_Act,KVT_End_time_Webfleet_Act,KVT_Pause,Work_Type_Code&\$filter={$wfFilter}&\$format=json";
+    $wf = (odata_get_all($wfUrl, $auth, 300) ?? null);
+    if ($wf !== null) {
+        // Filter to only include dates within the timesheet week
+        $wfFiltered = array_filter($wf, function ($line) use ($startDate, $endDate) {
+            $activityDate = (string) ($line['KVT_Date_Webfleet_Activity'] ?? '');
+            return $activityDate >= $startDate && $activityDate <= $endDate;
+        });
+        // Merge the filtered results into webfleetLines
+        $webfleetLines = array_merge($webfleetLines, $wfFiltered);
+    }
 }
 
 $holidays = holiday_set($year);
@@ -293,13 +306,13 @@ function dayIsHoliday($i)
                                     <td>
                                         <?php
                                         $isKM = ($wf['Work_Type_Code'] ?? '') == 'KM';
-                                        $startTime = (string) ($wf['KVT_Actual_Start_Time_Webfleet_Act'] ?? '');
+                                        $startTime = (string) ($wf['KVT_Start_time_Webfleet_Act'] ?? '');
                                         echo ($isKM && $startTime === '00:00:00') ? '' : htmlspecialchars($startTime);
                                         ?>
                                     </td>
                                     <td>
                                         <?php
-                                        $endTime = (string) ($wf['KVT_Actual_End_Time_Webfleet_Act'] ?? '');
+                                        $endTime = (string) ($wf['KVT_End_time_Webfleet_Act'] ?? '');
                                         echo ($isKM && $endTime === '00:00:00') ? '' : htmlspecialchars($endTime);
                                         ?>
                                     </td>

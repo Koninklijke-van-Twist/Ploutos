@@ -123,8 +123,8 @@ function dayIsHoliday($i)
         }
 
         body {
-            font-family: system-ui, Segoe UI, Arial;
             margin: 0;
+            font-family: Verdana, Geneva, Tahoma, sans-serif;
         }
 
         .holiday {

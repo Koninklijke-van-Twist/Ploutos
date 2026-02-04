@@ -191,7 +191,7 @@ $defaultYear = (new DateTimeImmutable("now"))->format("Y");
 
         body {
             margin: 0;
-            font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+            font-family: Verdana, Geneva, Tahoma, sans-serif;
             background: var(--bg);
             color: var(--text)
         }

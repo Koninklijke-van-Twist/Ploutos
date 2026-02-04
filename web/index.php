@@ -42,7 +42,7 @@ rsort($monthList); // nieuwste eerst
         }
 
         body {
-            font-family: system-ui, Segoe UI, Arial;
+            font-family: Verdana, Geneva, Tahoma, sans-serif;
             margin: 0;
             background: #f6f7fb
         }

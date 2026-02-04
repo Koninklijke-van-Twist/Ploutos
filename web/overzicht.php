@@ -265,8 +265,8 @@ function hhmm(int $min): string
         }
 
         body {
-            font-family: system-ui, Segoe UI, Arial;
             margin: 0;
+            font-family: Verdana, Geneva, Tahoma, sans-serif;
         }
 
         h2 {
@@ -412,17 +412,15 @@ function hhmm(int $min): string
         }
 
         .salary-slip-header {
-            display: flex;
             justify-content: space-between;
-            align-items: flex-start;
             margin-bottom: 20px;
             border-bottom: 2px solid #003da5;
             padding-bottom: 15px;
         }
 
         .salary-slip-header h1 {
-            flex: 1;
             margin: 0;
+            display: block;
             font-size: 28px;
             color: #003da5;
         }
@@ -430,7 +428,6 @@ function hhmm(int $min): string
         .salary-slip-header .logo {
             width: 200px;
             height: 80px;
-            display: flex;
             align-items: center;
             justify-content: center;
             border-radius: 4px;
@@ -499,6 +496,30 @@ function hhmm(int $min): string
 
         .salary-table tr.section-close td {
             border: none;
+        }
+
+        .kvt_banner {
+            background: #1a3a7a;
+            width: 100%;
+            color: white;
+            font-size: 2pc;
+            padding: 5px;
+            font-family: Verdana, Geneva, Tahoma, sans-serif;
+        }
+
+        .bottomAlign {
+            position: relative;
+            background-color: #fff;
+            width: 250px;
+        }
+
+        .bottomAlign div {
+            position: absolute;
+            bottom: 0;
+            left: 50px;
+            width: 200px;
+            right: 200px;
+            height: 200px;
         }
     </style>
     <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
@@ -789,8 +810,16 @@ function hhmm(int $min): string
             // Build salary slip HTML
             const salarySlip = `
                 <div class="salary-slip-header">
-                    <h1>Salarisspecificatie</h1>
-                    <div class="logo"><img class="kvt_logo_big" src="images/kvtlogo_l.png"/></div>
+                    <table>
+                        <tr>
+                        <td style="padding:0px;">
+                        <div class="kvt_banner">Koninklijke van Twist B.V.</div><br/>
+                        <h1>&nbsp;Salarisspecificatie</h1>
+                        </td><td class="bottomAlign">
+                        <div class="logo"><img class="kvt_logo_big" src="images/kvtlogo_l.png"/></div>
+                        </td>
+                        </tr>
+                    </table>
                 </div>
 
                 <div class="employee-info">

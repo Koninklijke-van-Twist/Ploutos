@@ -261,8 +261,8 @@ function dayIsHoliday($i)
 
 <body>
     <svg id="connection-overlay">
-        <line id="connection-line" x1="0" y1="0" x2="0" y2="0" stroke="#ffd877" stroke-width="4"
-            style="display:none;" />
+        <path id="connection-line" d="M 0 0 Q 0 0 0 0" stroke="#ffd877" stroke-width="4"
+            style="display:none; fill:none;" />
     </svg>
     <div class="wrap">
         <noprint><a class="btn" href="javascript:history.back()">← Terug</a></noprint>
@@ -429,18 +429,20 @@ function dayIsHoliday($i)
             const rect1 = elem1.getBoundingClientRect();
             const rect2 = elem2.getBoundingClientRect();
 
-            // elem1 is the timesheet cell - start from bottom-left corner
-            const x1 = rect1.left;
-            const y1 = rect1.bottom;
+            // Start from right edge of element1, vertically centered (3px before)
+            const x1 = rect1.right - 3;
+            const y1 = rect1.top + rect1.height / 2;
 
-            // elem2 is the webfleet row - end at top-center
-            const x2 = rect2.left + rect2.width / 2;
-            const y2 = rect2.top;
+            // End at right edge of element2, vertically centered (3px before)
+            const x2 = rect2.right - 3;
+            const y2 = rect2.top + rect2.height / 2;
 
-            connectionLine.setAttribute('x1', x1);
-            connectionLine.setAttribute('y1', y1);
-            connectionLine.setAttribute('x2', x2);
-            connectionLine.setAttribute('y2', y2);
+            // Control point to the right of both elements
+            const cx = Math.max(rect1.right, rect2.right) + 300;
+            const cy = (y1 + y2) / 2;
+
+            const pathData = `M ${x1} ${y1} Q ${cx} ${cy} ${x2} ${y2}`;
+            connectionLine.setAttribute('d', pathData);
             connectionLine.style.display = 'block';
         }
 

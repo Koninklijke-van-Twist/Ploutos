@@ -62,7 +62,7 @@ function odata_or_filter(string $field, array $values): string
 
 // Lines voor alle timesheets
 $lineFilter = odata_or_filter("Time_Sheet_No", $tsNos);
-$linesUrl = $base . "Urenstaatregels?\$select=Time_Sheet_No,Status,Header_Resource_No,Work_Type_Code,Field1,Field2,Field3,Field4,Field5,Field6,Field7,Total_Quantity&\$filter={$lineFilter}&\$format=json";
+$linesUrl = $base . "Urenstaatregels?\$select=Time_Sheet_No,Status,Header_Resource_No,Work_Type_Code,Job_Task_No,Field1,Field2,Field3,Field4,Field5,Field6,Field7,Total_Quantity&\$filter={$lineFilter}&\$format=json";
 $lines = odata_get_all($linesUrl, $auth, $day);
 
 // Codes voor “onkosten” en “verlet” (pas aan aan jouw BC codes)
@@ -114,7 +114,7 @@ foreach ($lines as $l) {
 
     // Init struct
     if (!isset($byPerson[$personNo])) {
-        $byPerson[$personNo] = ['personNo' => $personNo, 'name' => $name, 'weeks' => []];
+        $byPerson[$personNo] = ['personNo' => $personNo, 'name' => $name, 'weeks' => [], 'webfleet' => []];
     }
 
     if (!isset($byPerson[$personNo]['weeks'][$tsNo])) {
@@ -167,7 +167,52 @@ foreach ($lines as $l) {
     $byPerson[$personNo]['weeks'][$tsNo]['lines']++;
 }
 
+// Fetch webfleet data for each person
 foreach ($byPerson as $pKey => $person) {
+    $allTsNos = array_keys($person['weeks']);
+    $webfleetForPerson = [];
+
+    // Collect all Job_Task_No's for this person's timesheets
+    $jobTaskNos = [];
+    foreach ($lines as $l) {
+        $linePersonNo = (string) ($l['Header_Resource_No'] ?? '');
+        $lineTsNo = (string) ($l['Time_Sheet_No'] ?? '');
+        if ($linePersonNo === $person['personNo'] && in_array($lineTsNo, $allTsNos)) {
+            $jobTaskNo = (string) ($l['Job_Task_No'] ?? '');
+            if ($jobTaskNo !== '') {
+                $jobTaskNos[$jobTaskNo] = true;
+            }
+        }
+    }
+    $jobTaskNos = array_keys($jobTaskNos);
+
+    // Fetch webfleet data for these job tasks
+    if (!empty($jobTaskNos)) {
+        foreach ($jobTaskNos as $jobTaskNo) {
+            $wfFilter = rawurlencode("Job_Task_No eq '" . str_replace("'", "''", $jobTaskNo) . "'");
+            $wfUrl = $base . "WebfleetHours?\$select=Job_Task_No,KVT_Date_Webfleet_Activity,KVT_Start_time_Webfleet_Act,KVT_End_time_Webfleet_Act,KVT_Pause,Work_Type_Code,KVT_Calculated_Hours&\$filter={$wfFilter}&\$format=json";
+            $wf = (odata_get_all($wfUrl, $auth, $day) ?? []);
+
+            foreach ($wf as $wfLine) {
+                // Filter by dates from all timesheets
+                foreach ($allTsNos as $tsNo) {
+                    if (!isset($tsByNo[$tsNo]))
+                        continue;
+                    $startDate = $tsByNo[$tsNo]['Starting_Date'];
+                    $endDate = $tsByNo[$tsNo]['Ending_Date'];
+
+                    $activityDate = (string) ($wfLine['KVT_Date_Webfleet_Activity'] ?? '');
+                    if ($activityDate >= $startDate && $activityDate <= $endDate) {
+                        $webfleetForPerson[] = $wfLine;
+                        break; // Don't add the same line multiple times
+                    }
+                }
+            }
+        }
+    }
+
+    $byPerson[$pKey]['webfleet'] = $webfleetForPerson;
+
     foreach ($person['weeks'] as $tsKey => $ts) {
         // Dagdatums (Ma..Zo) uit weekStart
         $dates = [];
@@ -474,7 +519,7 @@ function hhmm(int $min): string
             <div class="card">
                 <h2><?= htmlspecialchars($person['name']) ?></h2>
                 <noprint><button class="print-btn"
-                        onclick="openPrintModal(event, '<?= htmlspecialchars(str_replace("'", "′", json_encode($person)), ENT_QUOTES) ?>')">
+                        onclick="openPrintModal(event, <?= htmlspecialchars(json_encode($person), ENT_QUOTES) ?>)">
                         Toon Salarisspecificatie
                     </button>
                 </noprint>
@@ -600,10 +645,9 @@ function hhmm(int $min): string
             const m = Math.round(min % 60);
             return `${sign}${h}:${String(m).padStart(2, '0')}`;
         }
-        function openPrintModal (event, personData)
+        function openPrintModal (event, person)
         {
             event.preventDefault();
-            const person = JSON.parse(personData);
             const modal = document.getElementById('printModal');
             const content = document.getElementById('salarySlipContent');
 
@@ -628,10 +672,94 @@ function hhmm(int $min): string
                 total85 += (week.p85 || 0) / 60;
             });
 
+            // Calculate time-based allowances from webfleet data
+            function calculateTimeAllowances (week, webfleetData)
+            {
+                let allowance009 = 0; // 18:00-21:00
+                let allowance018 = 0; // 21:00-24:00
+                let allowance030 = 0; // 00:00-06:00
+
+                if (!webfleetData || !Array.isArray(webfleetData)) return { allowance009, allowance018, allowance030 };
+
+                // Get webfleet entries for this week's dates
+                const weekStart = new Date(week.weekStart);
+                const weekDates = [];
+                for (let d = 0; d < 7; d++)
+                {
+                    const date = new Date(weekStart);
+                    date.setDate(weekStart.getDate() + d);
+                    weekDates.push(date.toISOString().split('T')[0]);
+                }
+
+                webfleetData.forEach(wf =>
+                {
+                    const activityDate = wf.KVT_Date_Webfleet_Activity;
+                    if (!weekDates.includes(activityDate)) return;
+
+                    // Only process SNT (standard normal time) and empty work types - skip overtime and KM
+                    const workType = wf.Work_Type_Code || '';
+                    if (workType === 'SOT125' || workType === 'SOT150' || workType === 'SOT200' || workType === 'KM') return;
+                    // Only include SNT or empty work type (normal work hours)
+                    if (workType !== '' && workType !== 'SNT') return;
+
+                    // Only process if we have valid start/end times
+                    const startTime = wf.KVT_Start_time_Webfleet_Act;
+                    const endTime = wf.KVT_End_time_Webfleet_Act;
+                    if (!startTime || !endTime || startTime === '00:00:00' && endTime === '00:00:00') return;
+
+                    // Parse times
+                    const [startH, startM] = startTime.split(':').map(Number);
+                    const [endH, endM] = endTime.split(':').map(Number);
+                    const startMinutes = startH * 60 + startM;
+                    let endMinutes = endH * 60 + endM;
+
+                    // Handle overnight shifts
+                    if (endMinutes < startMinutes) endMinutes += 24 * 60;
+
+                    // Calculate overlap with each time bracket
+                    // 18:00-21:00 (1080-1260 minutes)
+                    const bracket1Start = 18 * 60;
+                    const bracket1End = 21 * 60;
+                    const overlap1 = Math.max(0, Math.min(endMinutes, bracket1End) - Math.max(startMinutes, bracket1Start));
+                    allowance009 += overlap1;
+
+                    // 21:00-24:00 (1260-1440 minutes)
+                    const bracket2Start = 21 * 60;
+                    const bracket2End = 24 * 60;
+                    const overlap2 = Math.max(0, Math.min(endMinutes, bracket2End) - Math.max(startMinutes, bracket2Start));
+                    allowance018 += overlap2;
+
+                    // 00:00-06:00 (0-360 minutes or 1440-1800 for overnight)
+                    const bracket3Start = 0;
+                    const bracket3End = 6 * 60;
+                    let overlap3 = 0;
+                    if (endMinutes > 24 * 60)
+                    {
+                        // Overnight: check 24:00-30:00 range (mapped to 00:00-06:00)
+                        overlap3 = Math.max(0, Math.min(endMinutes, 24 * 60 + bracket3End) - Math.max(startMinutes, 24 * 60));
+                    } else if (startMinutes < bracket3End)
+                    {
+                        // Regular early morning
+                        overlap3 = Math.max(0, Math.min(endMinutes, bracket3End) - Math.max(startMinutes, bracket3Start));
+                    }
+                    allowance030 += overlap3;
+                });
+
+                return {
+                    allowance009: allowance009 / 60,
+                    allowance018: allowance018 / 60,
+                    allowance030: allowance030 / 60
+                };
+            }
+
             // Build hours per week rows
             let hours285Cells = '';
             let hours47Cells = '';
             let hours85Cells = '';
+            let allowance009Cells = '';
+            let allowance018Cells = '';
+            let allowance030Cells = '';
+            let total009 = 0, total018 = 0, total030 = 0;
             person.weeks.forEach(week =>
             {
                 const h285 = ((week.p285 || 0) / 60).toFixed(2);
@@ -640,10 +768,23 @@ function hhmm(int $min): string
                 hours285Cells += `<td>${h285 > 0 ? hhmm(h285) : ''}</td>`;
                 hours47Cells += `<td>${h47 > 0 ? hhmm(h47) : ''}</td>`;
                 hours85Cells += `<td>${h85 > 0 ? hhmm(h85) : ''}</td>`;
+
+                // Calculate time-based allowances
+                const allowances = calculateTimeAllowances(week, person.webfleet);
+                total009 += allowances.allowance009;
+                total018 += allowances.allowance018;
+                total030 += allowances.allowance030;
+
+                allowance009Cells += `<td>${allowances.allowance009 > 0 ? minutes_to_hhmm(allowances.allowance009 * 60) : ''}</td>`;
+                allowance018Cells += `<td>${allowances.allowance018 > 0 ? minutes_to_hhmm(allowances.allowance018 * 60) : ''}</td>`;
+                allowance030Cells += `<td>${allowances.allowance030 > 0 ? minutes_to_hhmm(allowances.allowance030 * 60) : ''}</td>`;
             });
             hours285Cells += `<td><strong>${hhmm(total285.toFixed(2))}</strong></td>`;
             hours47Cells += `<td><strong>${hhmm(total47.toFixed(2))}</strong></td>`;
             hours85Cells += `<td><strong>${hhmm(total85.toFixed(2))}</strong></td>`;
+            allowance009Cells += `<td><strong>${total009 > 0 ? minutes_to_hhmm(total009 * 60) : ''}</strong></td>`;
+            allowance018Cells += `<td><strong>${total018 > 0 ? minutes_to_hhmm(total018 * 60) : ''}</strong></td>`;
+            allowance030Cells += `<td><strong>${total030 > 0 ? minutes_to_hhmm(total030 * 60) : ''}</strong></td>`;
 
             // Build salary slip HTML
             const salarySlip = `
@@ -694,19 +835,16 @@ function hhmm(int $min): string
                             <td colspan="${totalWeeks + 2}">Toeslag - buiten dagvenster</td>
                         </tr>
                         <tr>
-                            <td>30%: 00:00 - 07:00 uur</td>
-                            ${'<td></td>'.repeat(totalWeeks + 1)}
+                            <td>0,09%: 18:00 - 21:00 uur</td>
+                            ${allowance009Cells}
                         </tr>
                         <tr>
-                            <td>50%: 20:00 - 00:00</td>
-                            ${'<td></td>'.repeat(totalWeeks + 1)}
-                        </tr>
-                        <tr class="section-header">
-                            <td colspan="${totalWeeks + 2}">Uren</td>
+                            <td>0,18%: 21:00 - 24:00</td>
+                            ${allowance018Cells}
                         </tr>
                         <tr>
-                            <td></td>
-                            ${'<td></td>'.repeat(totalWeeks + 1)}
+                            <td>0,30%: 00:00 - 06:00</td>
+                            ${allowance030Cells}
                         </tr>
                         <tr class="section-close">
                             <td colspan="${totalWeeks + 2}"></td>

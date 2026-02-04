@@ -66,6 +66,27 @@ function hhmm(float $hours): string
     return minutes_to_hhmm($hours * 60);
 }
 
+function formatDate(string $dateStr): string
+{
+    if (!$dateStr)
+        return '';
+    $dt = DateTime::createFromFormat('Y-m-d', $dateStr);
+    if (!$dt)
+        return htmlspecialchars($dateStr);
+    $months = ['januari', 'februari', 'maart', 'april', 'mei', 'juni', 'juli', 'augustus', 'september', 'oktober', 'november', 'december'];
+    return $dt->format('d') . ' ' . $months[$dt->format('n') - 1] . ' ' . $dt->format('Y');
+}
+
+function formatDateDayOnly(string $dateStr): string
+{
+    if (!$dateStr)
+        return '';
+    $dt = DateTime::createFromFormat('Y-m-d', $dateStr);
+    if (!$dt)
+        return htmlspecialchars($dateStr);
+    return $dt->format('d');
+}
+
 function dayIsHoliday($i)
 {
     global $ts;
@@ -184,6 +205,19 @@ function dayIsHoliday($i)
         td[data-task][data-worktype][data-date]:hover {
             cursor: pointer;
         }
+
+        .date-header {
+            height: auto;
+            padding: 4px 8px;
+            font-size: 11px;
+            align-content: center;
+            text-align: center;
+        }
+
+        .date-header-row th {
+            padding: 4px 2px;
+            background-color: #e4ecf8;
+        }
     </style>
     <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
     <link rel="icon" type="image/png" sizes="32x32" href="favicon-32x32.png">
@@ -200,15 +234,25 @@ function dayIsHoliday($i)
             <h1 style="margin:0 0 6px;">Weekinspectie</h1>
             <div class="muted">
                 <?= htmlspecialchars((string) ($ts['Description'] ?? '')) ?> ·
-                <?= htmlspecialchars((string) ($ts['Starting_Date'] ?? '')) ?> –
-                <?= htmlspecialchars((string) ($ts['Ending_Date'] ?? '')) ?><br>
-                Resource: <b>
-                    <?= htmlspecialchars($resourceNo) ?>
-                </b>
+                <?= htmlspecialchars((string) formatDate($ts['Starting_Date'] ?? '')) ?> –
+                <?= htmlspecialchars((string) formatDate($ts['Ending_Date'] ?? '')) ?><br>
+
             </div>
 
             <table>
                 <thead>
+                    <tr class="date-header-row">
+                        <th colspan="6" class="muted">Resource: <b>
+                                <?= htmlspecialchars($resourceNo) ?>
+                            </b></th>
+                        <?php for ($i = 1; $i <= 7; $i++):
+                            $d = $i - 1;
+                            $cellDate = date('Y-m-d', strtotime($ts['Starting_Date'] . " + {$d} days"));
+                            ?>
+                            <th class="date-header"><?= htmlspecialchars(formatDateDayOnly($cellDate)) ?></th>
+                        <?php endfor; ?>
+                        <th></th>
+                    </tr>
                     <tr>
                         <th>Line</th>
                         <th>Work type</th>
@@ -298,7 +342,7 @@ function dayIsHoliday($i)
                                         <?= htmlspecialchars((string) ($wf['Job_Task_No'] ?? '')) ?>
                                     </td>
                                     <td>
-                                        <?= htmlspecialchars((string) ($wf['KVT_Date_Webfleet_Activity'] ?? '')) ?>
+                                        <?= htmlspecialchars(formatDate((string) ($wf['KVT_Date_Webfleet_Activity'] ?? ''))) ?>
                                     </td>
                                     <td>
                                         <?= htmlspecialchars((string) ($wf['Work_Type_Code'] ?? '')) ?>

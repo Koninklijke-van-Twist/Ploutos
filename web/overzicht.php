@@ -22,6 +22,17 @@ if ($from && $to) {
     die("Geef month=YYYY-MM of from/to op.");
 }
 
+function formatDate(string $dateStr): string
+{
+    if (!$dateStr)
+        return '';
+    $dt = DateTime::createFromFormat('Y-m-d', $dateStr);
+    if (!$dt)
+        return htmlspecialchars($dateStr);
+    $months = ['januari', 'februari', 'maart', 'april', 'mei', 'juni', 'juli', 'augustus', 'september', 'oktober', 'november', 'december'];
+    return $dt->format('d') . ' ' . $months[$dt->format('n') - 1] . ' ' . $dt->format('Y');
+}
+
 // Timesheets die overlappen: Ending_Date ge from AND Starting_Date le to
 $filterDecoded = "Ending_Date ge $from and Starting_Date le $to";
 $filter = rawurlencode($filterDecoded);
@@ -451,18 +462,19 @@ function hhmm(int $min): string
 <body>
     <div class="wrap">
         <noprint><a href="feestdagen.php">Beheer Feestdagen</a></noprint>
-        <h1>Overzicht <?= htmlspecialchars($from) ?> t/m <?= htmlspecialchars($to) ?></h1>
+        <h1>Overzicht <?= formatDate(htmlspecialchars($from)) ?> t/m <?= formatDate(htmlspecialchars($to)) ?></h1>
         <noprint>
             <div class="muted">Klik op een week om details te bekijken.</div>
         </noprint>
 
         <?php foreach ($byPerson as $person): ?>
             <div class="card">
-                <noprint><button class="print-btn" style="position: absolute; margin-left: 10px; margin-top: 8px;"
-                        onclick="openPrintModal(event, '<?= htmlspecialchars(json_encode($person), ENT_QUOTES) ?>')">Afdrukken</button>
-                </noprint>
                 <h2><?= htmlspecialchars($person['name']) ?></h2>
-
+                <noprint><button class="print-btn"
+                        onclick="openPrintModal(event, '<?= htmlspecialchars(json_encode($person), ENT_QUOTES) ?>')">
+                        Toon Salarisspecificatie
+                    </button>
+                </noprint>
                 <table>
                     <thead>
                         <tr>
@@ -507,7 +519,7 @@ function hhmm(int $min): string
                                     </a>
                                 </td>
                                 <td><?= (int) $w['weekNo'] ?> <span
-                                        class="muted">(<?= htmlspecialchars($w['weekStart']) ?>)</span></td>
+                                        class="muted">(<?= formatDate(htmlspecialchars($w['weekStart'])) ?>)</span></td>
                                 <td><?= $i ?></td>
 
                                 <td <?= hhmm($w['weekTotaal'] * 60) == "0:00" ? "class=\"zeroTotal\"" : "" ?>>
@@ -631,7 +643,7 @@ function hhmm(int $min): string
                         <div>202601</div>
                     </div>
                     <div class="employee-info-block">
-                        <div class="employee-info-label">E-mail</div>
+                        <div class="employee-info-label"><!--email--></div>
                         <div></div>
                     </div>
                 </div>

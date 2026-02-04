@@ -218,6 +218,29 @@ function dayIsHoliday($i)
             padding: 4px 2px;
             background-color: #e4ecf8;
         }
+
+        .zeroHours {
+            color: #ccc;
+        }
+
+        .openStatus {
+            background-color: #ffa;
+            color: #770;
+        }
+
+        .submittedStatus {
+            background-color: #fa8;
+            color: #750;
+        }
+
+        .approvedStatus {
+            color: #070;
+        }
+
+        .rejectedStatus {
+            background-color: #f88;
+            color: #700;
+        }
     </style>
     <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
     <link rel="icon" type="image/png" sizes="32x32" href="favicon-32x32.png">
@@ -288,14 +311,24 @@ function dayIsHoliday($i)
                             <td>
                                 <?= htmlspecialchars((string) ($l['Job_Task_No'] ?? '')) ?>
                             </td>
-                            <td>
-                                <?= htmlspecialchars((string) ($l['Status'] ?? '')) ?>
+                            <td class="<?php
+                            $status = (string) ($l['Status'] ?? '');
+                            if ($status === "Open")
+                                echo "openStatus";
+                            elseif ($status === "Submitted")
+                                echo "submittedStatus";
+                            elseif ($status === "Rejected")
+                                echo "rejectedStatus";
+                            elseif ($status === "Approved")
+                                echo "approvedStatus";
+                            ?>">
+                                <?= htmlspecialchars($status) ?>
                             </td>
                             <?php for ($i = 1; $i <= 7; $i++):
                                 $d = $i - 1;
                                 $cellDate = date('Y-m-d', strtotime($ts['Starting_Date'] . " + {$d} days"));
                                 ?>
-                                <td <?= dayIsHoliday($i) ? "class=\"holiday\"" : "" ?>
+                                <td class="<?= dayIsHoliday($i) ? "holiday" : "" ?> <?= hhmm($l["Field{$i}"] ?? '0') == "0:00" ? "zeroHours" : "" ?>"
                                     data-task="<?= htmlspecialchars((string) ($l['Job_Task_No'] ?? '')) ?>"
                                     data-worktype="<?= htmlspecialchars((string) ($l['Work_Type_Code'] ?? '')) ?>"
                                     data-date="<?= $cellDate ?>" data-hours="<?= round((float) ($l["Field{$i}"] ?? 0), 2) ?>">

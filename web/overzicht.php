@@ -588,6 +588,32 @@ function hhmm(int $min): string
             });
             weeksHtml += '<th>Totaal</th>';
 
+            // Calculate totals for each category
+            let total285 = 0, total47 = 0, total85 = 0;
+            person.weeks.forEach(week =>
+            {
+                total285 += (week.p285 || 0) / 60;
+                total47 += (week.p47 || 0) / 60;
+                total85 += (week.p85 || 0) / 60;
+            });
+
+            // Build hours per week rows
+            let hours285Cells = '';
+            let hours47Cells = '';
+            let hours85Cells = '';
+            person.weeks.forEach(week =>
+            {
+                const h285 = ((week.p285 || 0) / 60).toFixed(2);
+                const h47 = ((week.p47 || 0) / 60).toFixed(2);
+                const h85 = ((week.p85 || 0) / 60).toFixed(2);
+                hours285Cells += `<td>${h285 > 0 ? h285 : ''}</td>`;
+                hours47Cells += `<td>${h47 > 0 ? h47 : ''}</td>`;
+                hours85Cells += `<td>${h85 > 0 ? h85 : ''}</td>`;
+            });
+            hours285Cells += `<td><strong>${total285.toFixed(2)}</strong></td>`;
+            hours47Cells += `<td><strong>${total47.toFixed(2)}</strong></td>`;
+            hours85Cells += `<td><strong>${total85.toFixed(2)}</strong></td>`;
+
             // Build salary slip HTML
             const salarySlip = `
                 <div class="salary-slip-header">
@@ -623,15 +649,15 @@ function hhmm(int $min): string
                         </tr>
                         <tr>
                             <td>28.5%: ma/vr eerste 2 overuren</td>
-                            ${'<td></td>'.repeat(totalWeeks + 1)}
+                            ${hours285Cells}
                         </tr>
                         <tr>
                             <td>47%: ma/vr overige uren en za</td>
-                            ${'<td></td>'.repeat(totalWeeks + 1)}
+                            ${hours47Cells}
                         </tr>
                         <tr>
                             <td>85%: zon- en feestdagen</td>
-                            ${'<td></td>'.repeat(totalWeeks + 1)}
+                            ${hours85Cells}
                         </tr>
                         <tr class="section-header">
                             <td colspan="${totalWeeks + 2}">Toeslag - buiten dagvenster</td>

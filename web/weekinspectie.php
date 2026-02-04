@@ -188,17 +188,17 @@ function dayIsHoliday($i)
         }
 
         .webfleet-row:hover {
-            background-color: #fef3c7;
+            background-color: #ffd877;
             cursor: pointer;
         }
 
         .highlight-cell {
-            background-color: #fef3c7 !important;
+            background-color: #ffd877 !important;
             transition: background-color 0.2s;
         }
 
         .highlight-row {
-            background-color: #fef3c7 !important;
+            background-color: #ffd877 !important;
             transition: background-color 0.2s;
         }
 
@@ -241,6 +241,16 @@ function dayIsHoliday($i)
             background-color: #f88;
             color: #700;
         }
+
+        #connection-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 1;
+        }
     </style>
     <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
     <link rel="icon" type="image/png" sizes="32x32" href="favicon-32x32.png">
@@ -250,6 +260,10 @@ function dayIsHoliday($i)
 </head>
 
 <body>
+    <svg id="connection-overlay">
+        <line id="connection-line" x1="0" y1="0" x2="0" y2="0" stroke="#ffd877" stroke-width="4"
+            style="display:none;" />
+    </svg>
     <div class="wrap">
         <noprint><a class="btn" href="javascript:history.back()">← Terug</a></noprint>
 
@@ -408,6 +422,33 @@ function dayIsHoliday($i)
         <?php endif; ?>
     </div>
     <script>
+        const connectionLine = document.getElementById('connection-line');
+
+        function drawLine (elem1, elem2)
+        {
+            const rect1 = elem1.getBoundingClientRect();
+            const rect2 = elem2.getBoundingClientRect();
+
+            // elem1 is the timesheet cell - start from bottom-left corner
+            const x1 = rect1.left;
+            const y1 = rect1.bottom;
+
+            // elem2 is the webfleet row - end at top-center
+            const x2 = rect2.left + rect2.width / 2;
+            const y2 = rect2.top;
+
+            connectionLine.setAttribute('x1', x1);
+            connectionLine.setAttribute('y1', y1);
+            connectionLine.setAttribute('x2', x2);
+            connectionLine.setAttribute('y2', y2);
+            connectionLine.style.display = 'block';
+        }
+
+        function hideLine ()
+        {
+            connectionLine.style.display = 'none';
+        }
+
         // Webfleet row hover -> highlight matching cells
         document.querySelectorAll('.webfleet-row').forEach(row =>
         {
@@ -416,6 +457,7 @@ function dayIsHoliday($i)
                 const task = this.dataset.task;
                 const worktype = this.dataset.worktype;
                 const date = this.dataset.date;
+                let matchedCell = null;
 
                 document.querySelectorAll('td[data-task][data-worktype][data-date]').forEach(cell =>
                 {
@@ -428,8 +470,14 @@ function dayIsHoliday($i)
                         Math.abs(cellHours - rowHours) <= tolerance)
                     {
                         cell.classList.add('highlight-cell');
+                        if (!matchedCell) matchedCell = cell;
                     }
                 });
+
+                if (matchedCell)
+                {
+                    drawLine(matchedCell, this);
+                }
             });
 
             row.addEventListener('mouseleave', function ()
@@ -438,6 +486,7 @@ function dayIsHoliday($i)
                 {
                     cell.classList.remove('highlight-cell');
                 });
+                hideLine();
             });
         });
 
@@ -450,6 +499,7 @@ function dayIsHoliday($i)
                 const worktype = this.dataset.worktype;
                 const date = this.dataset.date;
                 let matchFound = false;
+                let matchedRow = null;
 
                 document.querySelectorAll('.webfleet-row').forEach(row =>
                 {
@@ -463,6 +513,7 @@ function dayIsHoliday($i)
                     {
                         row.classList.add('highlight-row');
                         matchFound = true;
+                        if (!matchedRow) matchedRow = row;
                     }
                 });
 
@@ -470,6 +521,10 @@ function dayIsHoliday($i)
                 if (matchFound)
                 {
                     this.classList.add('highlight-cell');
+                    if (matchedRow)
+                    {
+                        drawLine(this, matchedRow);
+                    }
                 }
             });
 
@@ -480,6 +535,7 @@ function dayIsHoliday($i)
                     row.classList.remove('highlight-row');
                 });
                 this.classList.remove('highlight-cell');
+                hideLine();
             });
         });
     </script>

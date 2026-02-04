@@ -62,7 +62,7 @@ function odata_or_filter(string $field, array $values): string
 
 // Lines voor alle timesheets
 $lineFilter = odata_or_filter("Time_Sheet_No", $tsNos);
-$linesUrl = $base . "Urenstaatregels?\$select=Time_Sheet_No,Header_Resource_No,Work_Type_Code,Field1,Field2,Field3,Field4,Field5,Field6,Field7,Total_Quantity&\$filter={$lineFilter}&\$format=json";
+$linesUrl = $base . "Urenstaatregels?\$select=Time_Sheet_No,Status,Header_Resource_No,Work_Type_Code,Field1,Field2,Field3,Field4,Field5,Field6,Field7,Total_Quantity&\$filter={$lineFilter}&\$format=json";
 $lines = odata_get_all($linesUrl, $auth, $day);
 
 // Codes voor “onkosten” en “verlet” (pas aan aan jouw BC codes)
@@ -93,6 +93,9 @@ $byPerson = []; // personNo => ['name'=>..., 'weeks'=>[tsNo=>row]]
 foreach ($lines as $l) {
     $tsNo = (string) ($l['Time_Sheet_No'] ?? '');
     if ($tsNo === '' || !isset($tsByNo[$tsNo]))
+        continue;
+
+    if ($l['Status'] !== "Approved")
         continue;
 
     $personNo = (string) ($l['Header_Resource_No'] ?? '');

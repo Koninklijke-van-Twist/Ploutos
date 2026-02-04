@@ -474,7 +474,7 @@ function hhmm(int $min): string
             <div class="card">
                 <h2><?= htmlspecialchars($person['name']) ?></h2>
                 <noprint><button class="print-btn"
-                        onclick="openPrintModal(event, '<?= htmlspecialchars(str_replace(`'`, `′`, json_encode($person)), ENT_QUOTES) ?>')">
+                        onclick="openPrintModal(event, '<?= htmlspecialchars(str_replace("'", "′", json_encode($person)), ENT_QUOTES) ?>')">
                         Toon Salarisspecificatie
                     </button>
                 </noprint>

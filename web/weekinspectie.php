@@ -44,8 +44,8 @@ $startDate = $ts['Starting_Date'];
 $endDate = $ts['Ending_Date'];
 
 foreach ($allProjects as $project) {
-    $wfFilter = rawurlencode("LVS_Work_Order_No eq '" . str_replace("'", "''", $project) . "'");
-    $wfUrl = $base . "WebfleetHours?\$select=LVS_Work_Order_No,KVT_Date_Webfleet_Activity,KVT_Start_time_Webfleet_Act,KVT_End_time_Webfleet_Act,KVT_Pause,Work_Type_Code&\$filter={$wfFilter}&\$format=json";
+    $wfFilter = rawurlencode("Job_Task_No eq '" . str_replace("'", "''", $project) . "'");
+    $wfUrl = $base . "WebfleetHours?\$select=Job_Task_No,KVT_Date_Webfleet_Activity,KVT_Start_time_Webfleet_Act,KVT_End_time_Webfleet_Act,KVT_Pause,Work_Type_Code&\$filter={$wfFilter}&\$format=json";
     $wf = (odata_get_all($wfUrl, $auth, 300) ?? null);
     if ($wf !== null) {
         // Filter to only include dates within the timesheet week
@@ -290,12 +290,11 @@ function dayIsHoliday($i)
                     <tbody>
                         <?php foreach ($webfleetLines as $wf): ?>
                             <?php if ($wf): ?>
-                                <tr class="webfleet-row"
-                                    data-task="<?= htmlspecialchars((string) ($wf['LVS_Work_Order_No'] ?? '')) ?>"
+                                <tr class="webfleet-row" data-task="<?= htmlspecialchars((string) ($wf['Job_Task_No'] ?? '')) ?>"
                                     data-worktype="<?= htmlspecialchars((string) ($wf['Work_Type_Code'] ?? '')) ?>"
                                     data-date="<?= htmlspecialchars((string) ($wf['KVT_Date_Webfleet_Activity'] ?? '')) ?>">
                                     <td>
-                                        <?= htmlspecialchars((string) ($wf['LVS_Work_Order_No'] ?? '')) ?>
+                                        <?= htmlspecialchars((string) ($wf['Job_Task_No'] ?? '')) ?>
                                     </td>
                                     <td>
                                         <?= htmlspecialchars((string) ($wf['KVT_Date_Webfleet_Activity'] ?? '')) ?>

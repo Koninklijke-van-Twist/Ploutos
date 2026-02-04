@@ -45,7 +45,7 @@ $endDate = $ts['Ending_Date'];
 
 foreach ($allProjects as $project) {
     $wfFilter = rawurlencode("Job_Task_No eq '" . str_replace("'", "''", $project) . "'");
-    $wfUrl = $base . "WebfleetHours?\$select=Job_Task_No,KVT_Date_Webfleet_Activity,KVT_Start_time_Webfleet_Act,KVT_End_time_Webfleet_Act,KVT_Pause,Work_Type_Code&\$filter={$wfFilter}&\$format=json";
+    $wfUrl = $base . "WebfleetHours?\$select=Job_Task_No,KVT_Date_Webfleet_Activity,KVT_Start_time_Webfleet_Act,KVT_End_time_Webfleet_Act,KVT_Pause,Work_Type_Code,KVT_Calculated_Hours&\$filter={$wfFilter}&\$format=json";
     $wf = (odata_get_all($wfUrl, $auth, 300) ?? null);
     if ($wf !== null) {
         // Filter to only include dates within the timesheet week
@@ -254,7 +254,7 @@ function dayIsHoliday($i)
                                 <td <?= dayIsHoliday($i) ? "class=\"holiday\"" : "" ?>
                                     data-task="<?= htmlspecialchars((string) ($l['Job_Task_No'] ?? '')) ?>"
                                     data-worktype="<?= htmlspecialchars((string) ($l['Work_Type_Code'] ?? '')) ?>"
-                                    data-date="<?= $cellDate ?>">
+                                    data-date="<?= $cellDate ?>" data-hours="<?= round((float) ($l["Field{$i}"] ?? 0), 2) ?>">
 
                                     <?= $l['Work_Type_Code'] == "KM" ?
                                         htmlspecialchars((string) ($l["Field{$i}"] ?? '0')) . " km"
@@ -292,7 +292,8 @@ function dayIsHoliday($i)
                             <?php if ($wf): ?>
                                 <tr class="webfleet-row" data-task="<?= htmlspecialchars((string) ($wf['Job_Task_No'] ?? '')) ?>"
                                     data-worktype="<?= htmlspecialchars((string) ($wf['Work_Type_Code'] ?? '')) ?>"
-                                    data-date="<?= htmlspecialchars((string) ($wf['KVT_Date_Webfleet_Activity'] ?? '')) ?>">
+                                    data-date="<?= htmlspecialchars((string) ($wf['KVT_Date_Webfleet_Activity'] ?? '')) ?>"
+                                    data-hours="<?= round((float) ($wf['KVT_Calculated_Hours'] ?? 0), 2) ?>">
                                     <td>
                                         <?= htmlspecialchars((string) ($wf['Job_Task_No'] ?? '')) ?>
                                     </td>
@@ -341,9 +342,13 @@ function dayIsHoliday($i)
 
                 document.querySelectorAll('td[data-task][data-worktype][data-date]').forEach(cell =>
                 {
+                    const cellHours = parseFloat(cell.dataset.hours) || 0;
+                    const rowHours = parseFloat(this.dataset.hours) || 0;
+                    const tolerance = 0.5;
                     if (cell.dataset.task === task &&
                         cell.dataset.worktype === worktype &&
-                        cell.dataset.date === date)
+                        cell.dataset.date === date &&
+                        Math.abs(cellHours - rowHours) <= tolerance)
                     {
                         cell.classList.add('highlight-cell');
                     }
@@ -371,9 +376,13 @@ function dayIsHoliday($i)
 
                 document.querySelectorAll('.webfleet-row').forEach(row =>
                 {
+                    const rowHours = parseFloat(row.dataset.hours) || 0;
+                    const cellHours = parseFloat(this.dataset.hours) || 0;
+                    const tolerance = 0.5;
                     if (row.dataset.task === task &&
                         row.dataset.worktype === worktype &&
-                        row.dataset.date === date)
+                        row.dataset.date === date &&
+                        Math.abs(rowHours - cellHours) <= tolerance)
                     {
                         row.classList.add('highlight-row');
                         matchFound = true;

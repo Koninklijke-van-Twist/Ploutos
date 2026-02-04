@@ -290,6 +290,157 @@ function hhmm(int $min): string
         .right {
             text-align: right
         }
+
+        .kvt_logo_big {
+            max-width: 200px;
+        }
+
+        /* Print modal styles */
+        .print-modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: auto;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+            font-size: small;
+        }
+
+        .print-modal.active {
+            display: flex;
+        }
+
+        .print-modal-content {
+            background: white;
+            width: 210mm;
+            height: 297mm;
+            padding: 20mm;
+            overflow-y: clip;
+            position: relative;
+        }
+
+        .print-close-btn {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: #333;
+            color: white;
+            border: none;
+            padding: 10px 15px;
+            border-radius: 5px;
+            cursor: pointer;
+            z-index: 1001;
+        }
+
+        .print-close-btn:hover {
+            background: #555;
+        }
+
+        /* Salary slip styles */
+        .kvt-banner {
+            background: #003da5;
+            color: white;
+            padding: 15px;
+            text-align: center;
+            font-size: 16px;
+            font-weight: bold;
+            margin-bottom: 20px;
+            border-radius: 4px;
+        }
+
+        .salary-slip-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 20px;
+            border-bottom: 2px solid #003da5;
+            padding-bottom: 15px;
+        }
+
+        .salary-slip-header h1 {
+            flex: 1;
+            margin: 0;
+            font-size: 28px;
+            color: #003da5;
+        }
+
+        .salary-slip-header .logo {
+            width: 200px;
+            height: 80px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 4px;
+            font-size: 12px;
+            text-align: center;
+            color: #999;
+        }
+
+        .employee-info {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 30px;
+            margin-bottom: 20px;
+            font-size: 13px;
+        }
+
+        .employee-info-block {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .employee-info-label {
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+
+        .salary-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 20px;
+            font-size: 12px;
+        }
+
+        .salary-table th,
+        .salary-table td {
+            border: 1px solid #ccc;
+            padding: 8px;
+            text-align: right;
+        }
+
+        .salary-table th {
+            background: #f0f0f0;
+            text-align: center;
+            font-weight: bold;
+        }
+
+        .salary-table td:first-child,
+        .salary-table th:first-child {
+            text-align: left;
+        }
+
+        .salary-table tr.section-header {
+            background: #d4e4f7;
+            font-weight: bold;
+        }
+
+        .salary-table tr.section-header td {
+            border: none;
+            border-bottom: 1px solid #999;
+        }
+
+        .salary-table tr.section-close {
+            background: #1a3a7a;
+            border-bottom: 3px solid #1a3a7a;
+        }
+
+        .salary-table tr.section-close td {
+            border: none;
+        }
     </style>
     <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
     <link rel="icon" type="image/png" sizes="32x32" href="favicon-32x32.png">
@@ -307,6 +458,9 @@ function hhmm(int $min): string
 
         <?php foreach ($byPerson as $person): ?>
             <div class="card">
+                <noprint><button class="print-btn" style="position: absolute; margin-left: 10px; margin-top: 8px;"
+                        onclick="openPrintModal(event, '<?= htmlspecialchars(json_encode($person), ENT_QUOTES) ?>')">Afdrukken</button>
+                </noprint>
                 <h2><?= htmlspecialchars($person['name']) ?></h2>
 
                 <table>
@@ -402,6 +556,215 @@ function hhmm(int $min): string
             </div>
         <?php endforeach; ?>
     </div>
+
+    <!-- Print Modal -->
+    <div id="printModal" class="print-modal">
+        <div class="print-modal-content">
+            <noprint>
+                <button class="print-close-btn" onclick="window.print()" style="right: 70px;">Afdrukken</button>
+                <button class="print-close-btn" onclick="closePrintModal()">Sluiten</button>
+            </noprint>
+            <div id="salarySlipContent"></div>
+        </div>
+    </div>
+
+    <script>
+        function openPrintModal (event, personData)
+        {
+            event.preventDefault();
+            const person = JSON.parse(personData);
+            const modal = document.getElementById('printModal');
+            const content = document.getElementById('salarySlipContent');
+
+            // Build weeks columns
+            let weeksHtml = '';
+            let totalWeeks = person.weeks.length;
+            person.weeks.forEach(week =>
+            {
+                const weekYear = week.weekStart.substring(0, 4);
+                const weekDate = new Date(week.weekStart);
+                const weekNum = Math.ceil((weekDate.getDate() + new Date(weekDate.getFullYear(), weekDate.getMonth(), 1).getDay()) / 7);
+                weeksHtml += `<th>${weekYear}${String(weekNum).padStart(2, '0')}</th>`;
+            });
+            weeksHtml += '<th>Totaal</th>';
+
+            // Build salary slip HTML
+            const salarySlip = `
+                <div class="salary-slip-header">
+                    <h1>Salarisspecificatie</h1>
+                    <div class="logo"><img class="kvt_logo_big" src="images/kvtlogo_l.png"/></div>
+                </div>
+
+                <div class="employee-info">
+                    <div class="employee-info-block">
+                        <div class="employee-info-label">Werknemer:</div>
+                        <div>Salarisstrook</div>
+                    </div>
+                    <div class="employee-info-block">
+                        <div class="employee-info-label">${htmlspecialchars(person.name)}</div>
+                        <div>202601</div>
+                    </div>
+                    <div class="employee-info-block">
+                        <div class="employee-info-label">E-mail</div>
+                        <div></div>
+                    </div>
+                </div>
+
+                <table class="salary-table">
+                    <thead>
+                        <tr>
+                            <th>Uren</th>
+                            ${weeksHtml}
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr class="section-header">
+                            <td colspan="${totalWeeks + 2}">Overwerk</td>
+                        </tr>
+                        <tr>
+                            <td>28.5%: ma/vr eerste 2 overuren</td>
+                            ${'<td></td>'.repeat(totalWeeks + 1)}
+                        </tr>
+                        <tr>
+                            <td>47%: ma/vr overige uren en za</td>
+                            ${'<td></td>'.repeat(totalWeeks + 1)}
+                        </tr>
+                        <tr>
+                            <td>85%: zon- en feestdagen</td>
+                            ${'<td></td>'.repeat(totalWeeks + 1)}
+                        </tr>
+                        <tr class="section-header">
+                            <td colspan="${totalWeeks + 2}">Toeslag - buiten dagvenster</td>
+                        </tr>
+                        <tr>
+                            <td>30%: 00:00 - 07:00 uur</td>
+                            ${'<td></td>'.repeat(totalWeeks + 1)}
+                        </tr>
+                        <tr>
+                            <td>50%: 20:00 - 00:00</td>
+                            ${'<td></td>'.repeat(totalWeeks + 1)}
+                        </tr>
+                        <tr class="section-header">
+                            <td colspan="${totalWeeks + 2}">Uren</td>
+                        </tr>
+                        <tr>
+                            <td></td>
+                            ${'<td></td>'.repeat(totalWeeks + 1)}
+                        </tr>
+                        <tr class="section-close">
+                            <td colspan="${totalWeeks + 2}"></td>
+                        </tr>
+                    </tbody>
+                </table>
+
+                <table class="salary-table">
+                    <thead>
+                        <tr>
+                            <th>Vergoedingen</th>
+                            ${weeksHtml}
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>Koffievergoeding</td>
+                            ${'<td></td>'.repeat(totalWeeks + 1)}
+                        </tr>
+                        <tr>
+                            <td>Lunchvergoeding</td>
+                            ${'<td></td>'.repeat(totalWeeks + 1)}
+                        </tr>
+                        <tr>
+                            <td>Dinervergoeding</td>
+                            ${'<td></td>'.repeat(totalWeeks + 1)}
+                        </tr>
+                        <tr>
+                            <td>Scheidingsvergoeding &lt;EU</td>
+                            ${'<td></td>'.repeat(totalWeeks + 1)}
+                        </tr>
+                        <tr>
+                            <td>Scheidingsvergoeding &gt;EU</td>
+                            ${'<td></td>'.repeat(totalWeeks + 1)}
+                        </tr>
+                        <tr>
+                            <td>Weekendtoeslag</td>
+                            ${'<td></td>'.repeat(totalWeeks + 1)}
+                        </tr>
+                        <tr>
+                            <td>Consignatiedienst</td>
+                            ${'<td></td>'.repeat(totalWeeks + 1)}
+                        </tr>
+                        <tr>
+                            <td>Nachttoeslag</td>
+                            ${'<td></td>'.repeat(totalWeeks + 1)}
+                        </tr>
+                        <tr class="section-close">
+                            <td colspan="${totalWeeks + 2}"></td>
+                        </tr>
+                    </tbody>
+                </table>
+
+                <!--<table class="salary-table">
+                    <tbody>
+                        <tr class="section-header">
+                            <td colspan="${totalWeeks + 2}">Diversen</td>
+                        </tr>
+                        <tr>
+                            <td></td>
+                            ${'<td></td>'.repeat(totalWeeks + 1)}
+                        </tr>
+                        <tr>
+                            <td></td>
+                            ${'<td></td>'.repeat(totalWeeks + 1)}
+                        </tr>
+                        <tr class="section-header">
+                            <td colspan="${totalWeeks + 2}">Inhoudingen</td>
+                        </tr>
+                        <tr>
+                            <td></td>
+                            ${'<td></td>'.repeat(totalWeeks + 1)}
+                        </tr>
+                        <tr>
+                            <td></td>
+                            ${'<td></td>'.repeat(totalWeeks + 1)}
+                        </tr>
+                        <tr class="section-close">
+                            <td colspan="${totalWeeks + 2}"></td>
+                        </tr>
+                    </tbody>
+                </table>-->
+            `;
+
+            content.innerHTML = salarySlip;
+            modal.classList.add('active');
+            document.body.style.overflow = 'hidden';
+        }
+
+        function closePrintModal ()
+        {
+            const modal = document.getElementById('printModal');
+            modal.classList.remove('active');
+            document.body.style.overflow = 'auto';
+        }
+
+        // Close modal when clicking outside
+        document.getElementById('printModal')?.addEventListener('click', function (event)
+        {
+            if (event.target === this)
+            {
+                closePrintModal();
+            }
+        });
+
+        function htmlspecialchars (str)
+        {
+            return String(str)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#039;');
+        }
+    </script>
 </body>
 
 </html>

@@ -584,6 +584,22 @@ function hhmm(int $min): string
     </div>
 
     <script>
+        function hours_to_minutes (h)
+        {
+            return Math.round(h * 60);
+        }
+        function hhmm (h)
+        {
+            return minutes_to_hhmm(h * 60);
+        }
+        function minutes_to_hhmm (min)
+        {
+            const sign = min < 0 ? "-" : "";
+            min = Math.abs(min);
+            const h = Math.floor(min / 60);
+            const m = Math.round(min % 60);
+            return `${sign}${h}:${String(m).padStart(2, '0')}`;
+        }
         function openPrintModal (event, personData)
         {
             event.preventDefault();
@@ -621,13 +637,13 @@ function hhmm(int $min): string
                 const h285 = ((week.p285 || 0) / 60).toFixed(2);
                 const h47 = ((week.p47 || 0) / 60).toFixed(2);
                 const h85 = ((week.p85 || 0) / 60).toFixed(2);
-                hours285Cells += `<td>${h285 > 0 ? h285 : ''}</td>`;
-                hours47Cells += `<td>${h47 > 0 ? h47 : ''}</td>`;
-                hours85Cells += `<td>${h85 > 0 ? h85 : ''}</td>`;
+                hours285Cells += `<td>${h285 > 0 ? hhmm(h285) : ''}</td>`;
+                hours47Cells += `<td>${h47 > 0 ? hhmm(h47) : ''}</td>`;
+                hours85Cells += `<td>${h85 > 0 ? hhmm(h85) : ''}</td>`;
             });
-            hours285Cells += `<td><strong>${total285.toFixed(2)}</strong></td>`;
-            hours47Cells += `<td><strong>${total47.toFixed(2)}</strong></td>`;
-            hours85Cells += `<td><strong>${total85.toFixed(2)}</strong></td>`;
+            hours285Cells += `<td><strong>${hhmm(total285.toFixed(2))}</strong></td>`;
+            hours47Cells += `<td><strong>${hhmm(total47.toFixed(2))}</strong></td>`;
+            hours85Cells += `<td><strong>${hhmm(total85.toFixed(2))}</strong></td>`;
 
             // Build salary slip HTML
             const salarySlip = `

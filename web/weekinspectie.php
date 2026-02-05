@@ -45,7 +45,7 @@ $endDate = $ts['Ending_Date'];
 
 foreach ($allProjects as $project) {
     $wfFilter = rawurlencode("Job_Task_No eq '" . str_replace("'", "''", $project) . "'");
-    $wfUrl = $base . "WebfleetHours?\$select=Job_Task_No,KVT_Date_Webfleet_Activity,KVT_Start_time_Webfleet_Act,KVT_End_time_Webfleet_Act,KVT_Pause,Work_Type_Code,KVT_Calculated_Hours&\$filter={$wfFilter}&\$format=json";
+    $wfUrl = $base . "WebfleetHours?\$select=Job_Task_No,KVT_Date_Webfleet_Activity,KVT_Start_time_Webfleet_Act,Quantity,KVT_End_time_Webfleet_Act,KVT_Pause,Work_Type_Code,KVT_Calculated_Hours&\$filter={$wfFilter}&\$format=json";
     $wf = (odata_get_all($wfUrl, $auth, 300) ?? null);
     if ($wf !== null) {
         // Filter to only include dates within the timesheet week
@@ -384,7 +384,7 @@ function dayIsHoliday($i)
                                 <tr class="webfleet-row" data-task="<?= htmlspecialchars((string) ($wf['Job_Task_No'] ?? '')) ?>"
                                     data-worktype="<?= htmlspecialchars((string) ($wf['Work_Type_Code'] ?? '')) ?>"
                                     data-date="<?= htmlspecialchars((string) ($wf['KVT_Date_Webfleet_Activity'] ?? '')) ?>"
-                                    data-hours="<?= round((float) ($wf['KVT_Calculated_Hours'] ?? 0), 2) ?>">
+                                    data-hours="<?= ($wf['Work_Type_Code'] ?? '') == 'KM' ? round((float) ($wf['Quantity'] ?? 0), 2) : round((float) ($wf['KVT_Calculated_Hours'] ?? 0), 2) ?>">
                                     <td>
                                         <?= htmlspecialchars((string) ($wf['Job_Task_No'] ?? '')) ?>
                                     </td>

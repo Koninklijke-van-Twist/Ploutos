@@ -82,7 +82,7 @@ $needResNos = array_keys($needRes);
 $resourcesByNo = [];
 if ($needResNos) {
     $rf = odata_or_filter("No", $needResNos);
-    $resUrl = $base . "AppResources?\$select=No,Name&\$filter={$rf}&\$format=json";
+    $resUrl = $base . "AppResources?\$select=No,Name,Name_2&\$filter={$rf}&\$format=json";
     foreach (odata_get_all($resUrl, $auth, $day) as $r) {
         $resourcesByNo[(string) $r['No']] = $r;
     }
@@ -103,6 +103,7 @@ foreach ($lines as $l) {
         continue;
 
     $name = (string) ($resourcesByNo[$personNo]['Name'] ?? $personNo);
+    $name2 = (string) ($resourcesByNo[$personNo]['Name_2'] ?? $personNo);
 
     $workType = (string) ($l['Work_Type_Code'] ?? '');
     if ($workType == "KM")
@@ -114,7 +115,7 @@ foreach ($lines as $l) {
 
     // Init struct
     if (!isset($byPerson[$personNo])) {
-        $byPerson[$personNo] = ['personNo' => $personNo, 'name' => $name, 'weeks' => [], 'webfleet' => []];
+        $byPerson[$personNo] = ['personNo' => $personNo, 'name' => $name, 'email' => $name2, 'weeks' => [], 'webfleet' => []];
     }
 
     if (!isset($byPerson[$personNo]['weeks'][$tsNo])) {
@@ -650,6 +651,15 @@ function hhmm(int $min): string
     </div>
 
     <script>
+        function round_to_quarters (h)
+        {
+            const value = Number(h);
+            if (!Number.isFinite(value))
+            {
+                return '0.00';
+            }
+            return (Math.round(value * 4) / 4).toFixed(2);
+        }
         function hours_to_minutes (h)
         {
             return Math.round(h * 60);
@@ -786,9 +796,9 @@ function hhmm(int $min): string
                 const h285 = ((week.p285 || 0) / 60).toFixed(2);
                 const h47 = ((week.p47 || 0) / 60).toFixed(2);
                 const h85 = ((week.p85 || 0) / 60).toFixed(2);
-                hours285Cells += `<td>${h285 > 0 ? hhmm(h285) : ''}</td>`;
-                hours47Cells += `<td>${h47 > 0 ? hhmm(h47) : ''}</td>`;
-                hours85Cells += `<td>${h85 > 0 ? hhmm(h85) : ''}</td>`;
+                hours285Cells += `<td>${h285 > 0 ? round_to_quarters(h285) : ''}</td>`;
+                hours47Cells += `<td>${h47 > 0 ? round_to_quarters(h47) : ''}</td>`;
+                hours85Cells += `<td>${h85 > 0 ? round_to_quarters(h85) : ''}</td>`;
 
                 // Calculate time-based allowances
                 const allowances = calculateTimeAllowances(week, person.webfleet);
@@ -796,16 +806,16 @@ function hhmm(int $min): string
                 total018 += allowances.allowance018;
                 total030 += allowances.allowance030;
 
-                allowance009Cells += `<td>${allowances.allowance009 > 0 ? minutes_to_hhmm(allowances.allowance009 * 60) : ''}</td>`;
-                allowance018Cells += `<td>${allowances.allowance018 > 0 ? minutes_to_hhmm(allowances.allowance018 * 60) : ''}</td>`;
-                allowance030Cells += `<td>${allowances.allowance030 > 0 ? minutes_to_hhmm(allowances.allowance030 * 60) : ''}</td>`;
+                allowance009Cells += `<td>${allowances.allowance009 > 0 ? round_to_quarters(allowances.allowance009) : ''}</td>`;
+                allowance018Cells += `<td>${allowances.allowance018 > 0 ? round_to_quarters(allowances.allowance018) : ''}</td>`;
+                allowance030Cells += `<td>${allowances.allowance030 > 0 ? round_to_quarters(allowances.allowance030) : ''}</td>`;
             });
-            hours285Cells += `<td><strong>${hhmm(total285.toFixed(2))}</strong></td>`;
-            hours47Cells += `<td><strong>${hhmm(total47.toFixed(2))}</strong></td>`;
-            hours85Cells += `<td><strong>${hhmm(total85.toFixed(2))}</strong></td>`;
-            allowance009Cells += `<td><strong>${total009 > 0 ? minutes_to_hhmm(total009 * 60) : ''}</strong></td>`;
-            allowance018Cells += `<td><strong>${total018 > 0 ? minutes_to_hhmm(total018 * 60) : ''}</strong></td>`;
-            allowance030Cells += `<td><strong>${total030 > 0 ? minutes_to_hhmm(total030 * 60) : ''}</strong></td>`;
+            hours285Cells += `<td><strong>${round_to_quarters(total285.toFixed(2))}</strong></td>`;
+            hours47Cells += `<td><strong>${round_to_quarters(total47.toFixed(2))}</strong></td>`;
+            hours85Cells += `<td><strong>${round_to_quarters(total85.toFixed(2))}</strong></td>`;
+            allowance009Cells += `<td><strong>${total009 > 0 ? round_to_quarters(total009) : ''}</strong></td>`;
+            allowance018Cells += `<td><strong>${total018 > 0 ? round_to_quarters(total018) : ''}</strong></td>`;
+            allowance030Cells += `<td><strong>${total030 > 0 ? round_to_quarters(total030) : ''}</strong></td>`;
 
             // Build salary slip HTML
             const salarySlip = `
@@ -828,7 +838,7 @@ function hhmm(int $min): string
                         <div>Salarisstrook</div>
                     </div>
                     <div class="employee-info-block">
-                        <div class="employee-info-label">${htmlspecialchars(person.name)}</div>
+                        <div class="employee-info-label">${htmlspecialchars(person.name)}, ${htmlspecialchars(person.email)}</div>
                         <div>202601</div>
                     </div>
                     <div class="employee-info-block">

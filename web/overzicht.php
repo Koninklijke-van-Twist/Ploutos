@@ -82,7 +82,7 @@ $needResNos = array_keys($needRes);
 $resourcesByNo = [];
 if ($needResNos) {
     $rf = odata_or_filter("No", $needResNos);
-    $resUrl = $base . "AppResources?\$select=No,Name,Name_2&\$filter={$rf}&\$format=json";
+    $resUrl = $base . "AppResources?\$select=No,Name&\$filter={$rf}&\$format=json";
     foreach (odata_get_all($resUrl, $auth, $day) as $r) {
         $resourcesByNo[(string) $r['No']] = $r;
     }
@@ -103,7 +103,6 @@ foreach ($lines as $l) {
         continue;
 
     $name = (string) ($resourcesByNo[$personNo]['Name'] ?? $personNo);
-    $name2 = (string) ($resourcesByNo[$personNo]['Name_2'] ?? $personNo);
 
     $workType = (string) ($l['Work_Type_Code'] ?? '');
     if ($workType == "KM")
@@ -115,7 +114,7 @@ foreach ($lines as $l) {
 
     // Init struct
     if (!isset($byPerson[$personNo])) {
-        $byPerson[$personNo] = ['personNo' => $personNo, 'name' => $name, 'email' => $name2, 'weeks' => [], 'webfleet' => []];
+        $byPerson[$personNo] = ['personNo' => $personNo, 'name' => $name, 'weeks' => [], 'webfleet' => []];
     }
 
     if (!isset($byPerson[$personNo]['weeks'][$tsNo])) {
@@ -838,7 +837,7 @@ function hhmm(int $min): string
                         <div>Salarisstrook</div>
                     </div>
                     <div class="employee-info-block">
-                        <div class="employee-info-label">${htmlspecialchars(person.name)}, ${htmlspecialchars(person.email)}</div>
+                        <div class="employee-info-label">${htmlspecialchars(person.name)}</div>
                         <div>202601</div>
                     </div>
                     <div class="employee-info-block">

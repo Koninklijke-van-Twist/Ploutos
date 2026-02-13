@@ -372,12 +372,14 @@ function hhmm(int $min): string
             top: 0;
             left: 0;
             width: 100%;
-            height: auto;
+            height: 100%;
             background: rgba(0, 0, 0, 0.5);
             z-index: 1000;
             align-items: center;
             justify-content: center;
             font-size: small;
+            padding: 12px;
+            box-sizing: border-box;
         }
 
         .print-modal.active {
@@ -386,11 +388,17 @@ function hhmm(int $min): string
 
         .print-modal-content {
             background: white;
-            width: 210mm;
-            height: 297mm;
-            padding: 20mm;
-            overflow-y: clip;
+            width: min(96vw, 297mm);
+            max-height: 96vh;
+            padding: 12mm;
+            overflow: auto;
             position: relative;
+            box-sizing: border-box;
+        }
+
+        #salarySlipContent {
+            width: 100%;
+            overflow-x: auto;
         }
 
         .print-close-btn {
@@ -531,6 +539,48 @@ function hhmm(int $min): string
             width: 200px;
             right: 200px;
             height: 200px;
+        }
+
+        @media (max-width: 900px) {
+            .print-modal-content {
+                width: 100%;
+                max-height: 100%;
+                padding: 8mm;
+            }
+
+            .salary-table {
+                font-size: 11px;
+            }
+        }
+
+        @media print {
+            .print-modal {
+                display: none !important;
+            }
+
+            .print-modal-content {
+                width: 100%;
+                max-height: none;
+                padding: 0;
+                overflow: visible;
+            }
+
+            #salarySlipContent {
+                overflow: visible;
+            }
+
+            body.salary-slip-open .wrap {
+                display: none !important;
+            }
+
+            body.salary-slip-open .print-modal {
+                position: static;
+                width: auto;
+                height: auto;
+                background: none;
+                padding: 0;
+                display: block !important;
+            }
         }
     </style>
     <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
@@ -983,6 +1033,7 @@ function hhmm(int $min): string
 
             content.innerHTML = salarySlip;
             modal.classList.add('active');
+            document.body.classList.add('salary-slip-open');
             document.body.style.overflow = 'hidden';
         }
 
@@ -990,6 +1041,7 @@ function hhmm(int $min): string
         {
             const modal = document.getElementById('printModal');
             modal.classList.remove('active');
+            document.body.classList.remove('salary-slip-open');
             document.body.style.overflow = 'auto';
         }
 

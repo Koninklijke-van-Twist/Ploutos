@@ -7,6 +7,13 @@ require __DIR__ . "/lib_expenses.php";
 $resourceNo = trim((string) ($_GET['resourceNo'] ?? $_POST['resourceNo'] ?? ''));
 $from = trim((string) ($_GET['from'] ?? $_POST['from'] ?? ''));
 $to = trim((string) ($_GET['to'] ?? $_POST['to'] ?? ''));
+$month = trim((string) ($_GET['month'] ?? $_POST['month'] ?? ''));
+$returnPage = trim((string) ($_GET['returnPage'] ?? $_POST['returnPage'] ?? 'overzicht'));
+$returnTsNo = trim((string) ($_GET['returnTsNo'] ?? $_POST['returnTsNo'] ?? ''));
+
+if (!in_array($returnPage, ['overzicht', 'weekinspectie'], true)) {
+    $returnPage = 'overzicht';
+}
 
 if ($resourceNo === '' || $from === '' || $to === '') {
     die('Ontbrekende parameters. Vereist: resourceNo, from en to.');
@@ -66,6 +73,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $redirectUrl = 'onkosten_editor.php?resourceNo=' . rawurlencode($resourceNo)
         . '&from=' . rawurlencode($from)
         . '&to=' . rawurlencode($to)
+        . ($month !== '' ? '&month=' . rawurlencode($month) : '')
+        . '&returnPage=' . rawurlencode($returnPage)
+        . '&returnTsNo=' . rawurlencode($returnTsNo)
         . '&saved=1';
     header('Location: ' . $redirectUrl);
     exit;
@@ -73,7 +83,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 $resourceName = (string) ($tsRows[0]['Resource_Name'] ?? $resourceNo);
 $saved = (string) ($_GET['saved'] ?? '') === '1';
-$backUrl = 'overzicht.php?from=' . rawurlencode($from) . '&to=' . rawurlencode($to);
+if ($returnPage === 'weekinspectie' && $returnTsNo !== '') {
+    $backUrl = 'weekinspectie.php?tsNo=' . rawurlencode($returnTsNo)
+        . '&resourceNo=' . rawurlencode($resourceNo)
+        . ($month !== '' ? '&month=' . rawurlencode($month) : '')
+        . '&from=' . rawurlencode($from)
+        . '&to=' . rawurlencode($to);
+    $backLabel = 'Terug naar weekinspectie';
+} else {
+    $backUrl = $month !== ''
+        ? 'overzicht.php?month=' . rawurlencode($month)
+        : 'overzicht.php?from=' . rawurlencode($from) . '&to=' . rawurlencode($to);
+    $backLabel = 'Terug naar overzicht';
+}
 $typeKeys = array_keys($types);
 $splitAt = (int) ceil(count($typeKeys) / 2);
 $leftTypeKeys = array_slice($typeKeys, 0, $splitAt);
@@ -221,7 +243,8 @@ $rightTypeKeys = array_slice($typeKeys, $splitAt);
         <div class="card">
             <h1>Onkosten-editor: <?= htmlspecialchars($resourceName) ?></h1>
             <p class="muted">Per week integers invullen (0, 1, 2, ...). Periode: <?= formatDateNl($from) ?> t/m
-                <?= formatDateNl($to) ?></p>
+                <?= formatDateNl($to) ?>
+            </p>
             <?php if ($saved): ?>
                 <div class="ok">Opgeslagen.</div>
             <?php endif; ?>
@@ -229,13 +252,16 @@ $rightTypeKeys = array_slice($typeKeys, $splitAt);
             <?php if (!$tsRows): ?>
                 <p>Geen weken gevonden voor deze werknemer in deze periode.</p>
                 <div class="actions">
-                    <a class="btn" href="<?= htmlspecialchars($backUrl) ?>">Terug naar overzicht</a>
+                    <a class="btn" href="<?= htmlspecialchars($backUrl) ?>"><?= htmlspecialchars($backLabel) ?></a>
                 </div>
             <?php else: ?>
                 <form method="post">
                     <input type="hidden" name="resourceNo" value="<?= htmlspecialchars($resourceNo) ?>">
                     <input type="hidden" name="from" value="<?= htmlspecialchars($from) ?>">
                     <input type="hidden" name="to" value="<?= htmlspecialchars($to) ?>">
+                    <input type="hidden" name="month" value="<?= htmlspecialchars($month) ?>">
+                    <input type="hidden" name="returnPage" value="<?= htmlspecialchars($returnPage) ?>">
+                    <input type="hidden" name="returnTsNo" value="<?= htmlspecialchars($returnTsNo) ?>">
 
                     <div class="weeks">
                         <?php foreach ($tsRows as $t): ?>
@@ -283,7 +309,7 @@ $rightTypeKeys = array_slice($typeKeys, $splitAt);
 
                     <div class="actions">
                         <button type="submit" class="btn btn-primary">Opslaan</button>
-                        <a class="btn" href="<?= htmlspecialchars($backUrl) ?>">Terug naar overzicht</a>
+                        <a class="btn" href="<?= htmlspecialchars($backUrl) ?>"><?= htmlspecialchars($backLabel) ?></a>
                     </div>
                 </form>
             <?php endif; ?>

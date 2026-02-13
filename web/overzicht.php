@@ -624,7 +624,13 @@ function hhmm(int $min): string
                     <button class="btn"
                         onclick="openPrintModal(event, <?= htmlspecialchars(json_encode($person), ENT_QUOTES) ?>)">Toon
                         Salarisspecificatie</button>
-                    <?php $expensesEditorUrl = "onkosten_editor.php?resourceNo=" . rawurlencode($person['personNo']) . "&from=" . rawurlencode($from) . "&to=" . rawurlencode($to); ?>
+                    <?php
+                    $expensesEditorUrl = "onkosten_editor.php?resourceNo=" . rawurlencode($person['personNo'])
+                        . "&from=" . rawurlencode($from)
+                        . "&to=" . rawurlencode($to)
+                        . ($month !== '' ? "&month=" . rawurlencode($month) : '')
+                        . "&returnPage=overzicht";
+                    ?>
                     <a href="<?= htmlspecialchars($expensesEditorUrl) ?>"><button class="btn">Onkosten Invoeren</button></a>
                 </noprint>
                 <table>
@@ -662,7 +668,11 @@ function hhmm(int $min): string
                             $totOnk += (float) $w['onkosten'];
                             $totVer += (float) $w['verlet'];
 
-                            $inspectUrl = "weekinspectie.php?tsNo=" . rawurlencode($w['tsNo']) . "&resourceNo=" . rawurlencode($person['personNo']);
+                            $inspectUrl = "weekinspectie.php?tsNo=" . rawurlencode($w['tsNo'])
+                                . "&resourceNo=" . rawurlencode($person['personNo'])
+                                . ($month !== ''
+                                    ? "&month=" . rawurlencode($month)
+                                    : "&from=" . rawurlencode($from) . "&to=" . rawurlencode($to));
                             ?>
                             <tr>
                                 <td>

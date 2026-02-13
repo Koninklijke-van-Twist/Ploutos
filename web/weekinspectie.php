@@ -2,10 +2,14 @@
 require __DIR__ . "/odata.php";
 require __DIR__ . "/auth.php";
 require __DIR__ . "/lib_times.php";
+require __DIR__ . "/lib_expenses.php";
 require __DIR__ . "/logincheck.php";
 
 $tsNo = trim((string) ($_GET['tsNo'] ?? ''));
 $resourceNo = trim((string) ($_GET['resourceNo'] ?? ''));
+$from = trim((string) ($_GET['from'] ?? ''));
+$to = trim((string) ($_GET['to'] ?? ''));
+$month = trim((string) ($_GET['month'] ?? ''));
 if ($tsNo === '' || $resourceNo === '')
     die("tsNo/resourceNo ontbreekt");
 
@@ -42,6 +46,32 @@ $allProjects = array_unique(array_filter(array_column($lines, 'Job_Task_No')));
 $webfleetLines = [];
 $startDate = $ts['Starting_Date'];
 $endDate = $ts['Ending_Date'];
+$expensesTypes = expenses_types();
+$expenseDb = expenses_db();
+$expensesByTs = expenses_get_for_resource_weeks($expenseDb, $resourceNo, [$tsNo]);
+$weekExpenses = $expensesByTs[$tsNo] ?? [];
+$weekExpensesPositive = [];
+if (isset($expensesByTs[$tsNo])) {
+    foreach ($expensesTypes as $key => $label) {
+        $value = (int) ($weekExpenses[$key] ?? 0);
+        if ($value > 0) {
+            $weekExpensesPositive[$key] = $value;
+        }
+    }
+}
+$hasWeekExpenses = !empty($weekExpensesPositive);
+$expensesEditorUrl = 'onkosten_editor.php?resourceNo=' . rawurlencode($resourceNo)
+    . '&from=' . rawurlencode((string) $startDate)
+    . '&to=' . rawurlencode((string) $endDate)
+    . ($month !== '' ? '&month=' . rawurlencode($month) : '')
+    . '&returnPage=weekinspectie'
+    . '&returnTsNo=' . rawurlencode($tsNo);
+
+$backFrom = $from !== '' ? $from : (string) $startDate;
+$backTo = $to !== '' ? $to : (string) $endDate;
+$backUrl = $month !== ''
+    ? 'overzicht.php?month=' . rawurlencode($month)
+    : 'overzicht.php?from=' . rawurlencode($backFrom) . '&to=' . rawurlencode($backTo);
 
 foreach ($allProjects as $project) {
     $wfFilter = rawurlencode("Job_Task_No eq '" . str_replace("'", "''", $project) . "'");
@@ -265,7 +295,9 @@ function dayIsHoliday($i)
             style="display:none; fill:none;" />
     </svg>
     <div class="wrap">
-        <noprint><a class="btn" href="javascript:history.back()">← Terug</a></noprint>
+        <noprint>
+            <a class="btn" href="<?= htmlspecialchars($backUrl) ?>">← Terug</a>
+        </noprint>
 
         <div class="card" style="margin-top:12px;">
             <h1 style="margin:0 0 6px;">Weekinspectie</h1>
@@ -418,6 +450,31 @@ function dayIsHoliday($i)
                         <?php endforeach; ?>
                     </tbody>
                 </table>
+            </div>
+        <?php endif; ?>
+
+        <?php if ($hasWeekExpenses): ?>
+            <div class="card" style="margin-top:12px;">
+                <h2 style="margin:0 0 12px;">Onkosten</h2>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Onkostensoort</th>
+                            <th>Waarde</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php foreach ($weekExpensesPositive as $key => $value): ?>
+                            <tr>
+                                <td><?= htmlspecialchars($expensesTypes[$key]) ?></td>
+                                <td><?= (int) $value ?></td>
+                            </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+                <noprint style="margin-top:12px; display:block;">
+                    <a class="btn" href="<?= htmlspecialchars($expensesEditorUrl) ?>">Onkosten bewerken</a>
+                </noprint>
             </div>
         <?php endif; ?>
     </div>

@@ -272,6 +272,46 @@ foreach ($byPerson as &$p) {
 }
 unset($p);
 
+if ((string) ($_GET['export'] ?? '') === 'csv') {
+    $filenameSuffix = $month !== '' ? $month : ($from . '_' . $to);
+    $filenameSuffix = preg_replace('/[^0-9A-Za-z_-]/', '_', (string) $filenameSuffix);
+    $filename = 'overzicht_' . $filenameSuffix . '.csv';
+
+    header('Content-Type: text/csv; charset=UTF-8');
+    header('Content-Disposition: attachment; filename="' . $filename . '"');
+
+    $out = fopen('php://output', 'w');
+    if ($out === false) {
+        die('Kon CSV niet genereren.');
+    }
+
+    fwrite($out, "\xEF\xBB\xBF");
+    fwrite($out, "sep=;\r\n");
+    fputcsv($out, ['Naam', 'Totaal 28.5%', 'Totaal 47%', 'Totaal 85%'], ';');
+
+    foreach ($byPerson as $person) {
+        $tot285 = 0;
+        $tot47 = 0;
+        $tot85 = 0;
+
+        foreach ($person['weeks'] as $w) {
+            $tot285 += (int) ($w['p285'] ?? 0);
+            $tot47 += (int) ($w['p47'] ?? 0);
+            $tot85 += (int) ($w['p85'] ?? 0);
+        }
+
+        fputcsv($out, [
+            (string) ($person['name'] ?? ''),
+            round_to_quarters($tot285 / 60),
+            round_to_quarters($tot47 / 60),
+            round_to_quarters($tot85 / 60),
+        ], ';');
+    }
+
+    fclose($out);
+    exit;
+}
+
 function eur(float $v): string
 {
     return "€ " . number_format($v, 2, ",", ".");
@@ -611,7 +651,18 @@ function hhmm(int $min): string
 
 <body>
     <div class="wrap">
-        <noprint><a href="feestdagen.php">Beheer Feestdagen</a></noprint>
+        <noprint>
+            <a class="btn" href="feestdagen.php">Beheer Feestdagen</a>
+            <?php
+            $exportUrl = 'overzicht.php?export=csv';
+            if ($month !== '') {
+                $exportUrl .= '&month=' . rawurlencode($month);
+            } else {
+                $exportUrl .= '&from=' . rawurlencode($from) . '&to=' . rawurlencode($to);
+            }
+            ?>
+            <a class="btn" href="<?= htmlspecialchars($exportUrl) ?>">Export totalen als CSV</a>
+        </noprint>
         <h1>Overzicht <?= formatDate(htmlspecialchars($from)) ?> t/m <?= formatDate(htmlspecialchars($to)) ?></h1>
         <noprint>
             <div class="muted">Klik op een week om details te bekijken.</div>

@@ -2,6 +2,7 @@
 require __DIR__ . "/odata.php";
 require __DIR__ . "/auth.php";
 require __DIR__ . "/lib_times.php";
+require __DIR__ . "/lib_expenses.php";
 require __DIR__ . "/logincheck.php";
 
 $hour = 3600;
@@ -10,6 +11,7 @@ $day = $hour * 24;
 $month = trim((string) ($_GET['month'] ?? ''));
 $from = trim((string) ($_GET['from'] ?? ''));
 $to = trim((string) ($_GET['to'] ?? ''));
+$expenseDefaults = expenses_defaults();
 
 // Bepaal range
 if ($from && $to) {
@@ -143,6 +145,7 @@ foreach ($lines as $l) {
             'p85' => 0,
             'onkosten' => 0.0,
             'verlet' => 0.0,
+            'expenses' => $expenseDefaults,
             'lines' => 0
         ];
     }
@@ -242,6 +245,23 @@ foreach ($byPerson as $pKey => $person) {
         $byPerson[$pKey]['weeks'][$tsKey]["weekTotaal"] = $weekTotal;
     }
 }
+
+$expenseDb = expenses_db();
+$expensePairs = [];
+foreach ($byPerson as $personNo => $person) {
+    foreach (array_keys($person['weeks']) as $tsNo) {
+        $expensePairs[] = ['resource_no' => $personNo, 'ts_no' => $tsNo];
+    }
+}
+$expensesByPair = expenses_get_for_pairs($expenseDb, $expensePairs);
+foreach ($byPerson as $personNo => &$person) {
+    foreach ($person['weeks'] as $tsNo => &$week) {
+        $pairKey = $personNo . '|' . $tsNo;
+        $week['expenses'] = $expensesByPair[$pairKey] ?? $expenseDefaults;
+    }
+    unset($week);
+}
+unset($person);
 
 // Sortering: personen op naam, weken per persoon op weeknummer desc
 usort($byPerson, fn($a, $b) => strcmp($a['name'], $b['name']));
@@ -600,10 +620,12 @@ function hhmm(int $min): string
         <?php foreach ($byPerson as $person): ?>
             <div class="card">
                 <h2><?= htmlspecialchars($person['name']) ?></h2>
-                <noprint><button class="print-btn"
-                        onclick="openPrintModal(event, <?= htmlspecialchars(json_encode($person), ENT_QUOTES) ?>)">
-                        Toon Salarisspecificatie
-                    </button>
+                <noprint>
+                    <button class="btn"
+                        onclick="openPrintModal(event, <?= htmlspecialchars(json_encode($person), ENT_QUOTES) ?>)">Toon
+                        Salarisspecificatie</button>
+                    <?php $expensesEditorUrl = "onkosten_editor.php?resourceNo=" . rawurlencode($person['personNo']) . "&from=" . rawurlencode($from) . "&to=" . rawurlencode($to); ?>
+                    <a href="<?= htmlspecialchars($expensesEditorUrl) ?>"><button class="btn">Onkosten Invoeren</button></a>
                 </noprint>
                 <table>
                     <thead>
@@ -854,6 +876,16 @@ function hhmm(int $min): string
             let allowance018Cells = '';
             let allowance030Cells = '';
             let total009 = 0, total018 = 0, total030 = 0;
+            const expenseRows = {
+                coffee: { label: 'Koffievergoeding', cells: '', total: 0 },
+                lunch: { label: 'Lunchvergoeding', cells: '', total: 0 },
+                dinner: { label: 'Dinervergoeding', cells: '', total: 0 },
+                separation_lt_eu: { label: 'Scheidingsvergoeding <EU', cells: '', total: 0 },
+                separation_gt_eu: { label: 'Scheidingsvergoeding >EU', cells: '', total: 0 },
+                weekend: { label: 'Weekendtoeslag', cells: '', total: 0 },
+                on_call: { label: 'Consignatiedienst', cells: '', total: 0 },
+                night: { label: 'Nachttoeslag', cells: '', total: 0 }
+            };
             person.weeks.forEach(week =>
             {
                 const h285 = ((week.p285 || 0) / 60).toFixed(2);
@@ -869,6 +901,14 @@ function hhmm(int $min): string
                 total018 += allowances.allowance018;
                 total030 += allowances.allowance030;
 
+                const weekExpenses = week.expenses || {};
+                Object.keys(expenseRows).forEach(key =>
+                {
+                    const value = Math.max(0, Math.round(Number(weekExpenses[key] || 0)));
+                    expenseRows[key].total += value;
+                    expenseRows[key].cells += `<td>${value > 0 ? value : ''}</td>`;
+                });
+
                 allowance009Cells += `<td>${allowances.allowance009 > 0 ? round_to_quarters(allowances.allowance009) : ''}</td>`;
                 allowance018Cells += `<td>${allowances.allowance018 > 0 ? round_to_quarters(allowances.allowance018) : ''}</td>`;
                 allowance030Cells += `<td>${allowances.allowance030 > 0 ? round_to_quarters(allowances.allowance030) : ''}</td>`;
@@ -879,6 +919,9 @@ function hhmm(int $min): string
             allowance009Cells += `<td><strong>${total009 > 0 ? round_to_quarters(total009) : ''}</strong></td>`;
             allowance018Cells += `<td><strong>${total018 > 0 ? round_to_quarters(total018) : ''}</strong></td>`;
             allowance030Cells += `<td><strong>${total030 > 0 ? round_to_quarters(total030) : ''}</strong></td>`;
+            const reimbursementRowsHtml = Object.values(expenseRows)
+                .map(row => `<tr><td>${row.label}</td>${row.cells}<td><strong>${row.total > 0 ? row.total : ''}</strong></td></tr>`)
+                .join('');
 
             // Build salary slip HTML
             const salarySlip = `
@@ -962,38 +1005,7 @@ function hhmm(int $min): string
                         </tr>
                     </thead>
                     <tbody>
-                        <tr>
-                            <td>Koffievergoeding</td>
-                            ${'<td></td>'.repeat(totalWeeks + 1)}
-                        </tr>
-                        <tr>
-                            <td>Lunchvergoeding</td>
-                            ${'<td></td>'.repeat(totalWeeks + 1)}
-                        </tr>
-                        <tr>
-                            <td>Dinervergoeding</td>
-                            ${'<td></td>'.repeat(totalWeeks + 1)}
-                        </tr>
-                        <tr>
-                            <td>Scheidingsvergoeding &lt;EU</td>
-                            ${'<td></td>'.repeat(totalWeeks + 1)}
-                        </tr>
-                        <tr>
-                            <td>Scheidingsvergoeding &gt;EU</td>
-                            ${'<td></td>'.repeat(totalWeeks + 1)}
-                        </tr>
-                        <tr>
-                            <td>Weekendtoeslag</td>
-                            ${'<td></td>'.repeat(totalWeeks + 1)}
-                        </tr>
-                        <tr>
-                            <td>Consignatiedienst</td>
-                            ${'<td></td>'.repeat(totalWeeks + 1)}
-                        </tr>
-                        <tr>
-                            <td>Nachttoeslag</td>
-                            ${'<td></td>'.repeat(totalWeeks + 1)}
-                        </tr>
+                        ${reimbursementRowsHtml}
                         <tr class="section-close">
                             <td colspan="${totalWeeks + 2}"></td>
                         </tr>

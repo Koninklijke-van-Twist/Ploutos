@@ -33,6 +33,17 @@ function formatDate(string $dateStr): string
     return $dt->format('d') . ' ' . $months[$dt->format('n') - 1] . ' ' . $dt->format('Y');
 }
 
+function round_to_quarters(float $h): string
+{
+    if (!is_numeric($h)) {
+        return '0.00';
+    }
+
+    $value = (float) $h;
+    $rounded = round($value * 4) / 4;
+    return number_format($rounded, 2, '.', '');
+}
+
 // Timesheets die overlappen: Ending_Date ge from AND Starting_Date le to
 $filterDecoded = "Ending_Date ge $from and Starting_Date le $to";
 $filter = rawurlencode($filterDecoded);
@@ -592,18 +603,18 @@ function hhmm(int $min): string
                                 <td><?= $i ?></td>
 
                                 <td <?= hhmm($w['weekTotaal'] * 60) == "0:00" ? "class=\"zeroTotal\"" : "" ?>>
-                                    <?= hhmm($w['weekTotaal'] * 60) ?>
+                                    <?= round_to_quarters($w['weekTotaal']) ?>
                                 </td>
                                 <td class="right <?= $w['p285'] == 0 ? "zeroTotal" : "" ?>">
-                                    <?= htmlspecialchars(hhmm((int) $w['p285'])) ?>
+                                    <?= htmlspecialchars(round_to_quarters((int) $w['p285'] / 60)) ?>
                                 </td>
                                 <td></td>
                                 <td class="right <?= $w['p47'] == 0 ? "zeroTotal" : "" ?>">
-                                    <?= htmlspecialchars(hhmm((int) $w['p47'])) ?>
+                                    <?= htmlspecialchars(round_to_quarters((int) $w['p47'] / 60)) ?>
                                 </td>
                                 <td></td>
                                 <td class="right <?= $w['p85'] == 0 ? "zeroTotal" : "" ?>">
-                                    <?= htmlspecialchars(hhmm((int) $w['p85'])) ?>
+                                    <?= htmlspecialchars(round_to_quarters((int) $w['p85'] / 60)) ?>
                                 </td>
                                 <td></td>
                                 <td class="right <?= $w['onkosten'] == 0 ? "zeroTotal" : "" ?>">
@@ -618,13 +629,16 @@ function hhmm(int $min): string
                     <tfoot>
                         <tr>
                             <td colspan="4">Totalen</td>
-                            <td class="right <?= $tot285 == 0 ? "zeroTotal" : "" ?>"><?= htmlspecialchars(hhmm($tot285)) ?>
+                            <td class="right <?= $tot285 == 0 ? "zeroTotal" : "" ?>">
+                                <?= htmlspecialchars(round_to_quarters($tot285 / 60)) ?>
                             </td>
                             <td></td>
-                            <td class="right <?= $tot47 == 0 ? "zeroTotal" : "" ?>"><?= htmlspecialchars(hhmm($tot47)) ?>
+                            <td class="right <?= $tot47 == 0 ? "zeroTotal" : "" ?>">
+                                <?= htmlspecialchars(round_to_quarters($tot47 / 60)) ?>
                             </td>
                             <td></td>
-                            <td class="right <?= $tot85 == 0 ? "zeroTotal" : "" ?>"><?= htmlspecialchars(hhmm($tot85)) ?>
+                            <td class="right <?= $tot85 == 0 ? "zeroTotal" : "" ?>">
+                                <?= htmlspecialchars(round_to_quarters($tot85 / 60)) ?>
                             </td>
                             <td></td>
                             <td class="right <?= $totOnk == 0 ? "zeroTotal" : "" ?>"><?= htmlspecialchars(eur($totOnk)) ?>

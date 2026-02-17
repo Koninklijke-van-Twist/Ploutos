@@ -817,7 +817,7 @@ function hhmm(int $min): string
                 <table>
                     <thead>
                         <tr>
-                            <th></th>
+                            <th>Overuren</th>
                             <th>Weeknummer</th>
                             <th>#</th>
                             <th>Gewerkt</th>
@@ -915,7 +915,7 @@ function hhmm(int $min): string
                 <table style="margin-top:12px;">
                     <thead>
                         <tr>
-                            <th></th>
+                            <th>Onkosten</th>
                             <th>Weeknummer</th>
                             <th>#</th>
                             <th class="right">Lunch</th>

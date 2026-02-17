@@ -46,6 +46,85 @@ function round_to_quarters(float $h): string
     return number_format($rounded, 2, '.', '');
 }
 
+function csv_decimal_quarters(float $h): string
+{
+    return str_replace('.', ',', round_to_quarters($h));
+}
+
+function calculate_time_allowances_for_week(array $week, array $webfleetData): array
+{
+    $allowance009 = 0; // 18:00-21:00
+    $allowance018 = 0; // 21:00-24:00
+    $allowance030 = 0; // 00:00-06:00
+
+    if (!$webfleetData) {
+        return ['allowance009' => 0, 'allowance018' => 0, 'allowance030' => 0];
+    }
+
+    $weekStartRaw = (string) ($week['weekStart'] ?? '');
+    if ($weekStartRaw === '') {
+        return ['allowance009' => 0, 'allowance018' => 0, 'allowance030' => 0];
+    }
+
+    $weekDates = [];
+    for ($d = 0; $d < 7; $d++) {
+        $weekDates[] = ymd_add_days($weekStartRaw, $d);
+    }
+
+    foreach ($webfleetData as $wf) {
+        $activityDate = (string) ($wf['KVT_Date_Webfleet_Activity'] ?? '');
+        if ($activityDate === '' || !in_array($activityDate, $weekDates, true)) {
+            continue;
+        }
+
+        $workType = (string) ($wf['Work_Type_Code'] ?? '');
+        if ($workType === 'SOT125' || $workType === 'SOT150' || $workType === 'SOT200' || $workType === 'KM') {
+            continue;
+        }
+        if ($workType !== '' && $workType !== 'SNT') {
+            continue;
+        }
+
+        $startTime = (string) ($wf['KVT_Start_time_Webfleet_Act'] ?? '');
+        $endTime = (string) ($wf['KVT_End_time_Webfleet_Act'] ?? '');
+        if ($startTime === '' || $endTime === '' || ($startTime === '00:00:00' && $endTime === '00:00:00')) {
+            continue;
+        }
+
+        $startParts = explode(':', $startTime);
+        $endParts = explode(':', $endTime);
+        if (count($startParts) < 2 || count($endParts) < 2) {
+            continue;
+        }
+
+        $startMinutes = ((int) $startParts[0]) * 60 + (int) $startParts[1];
+        $endMinutes = ((int) $endParts[0]) * 60 + (int) $endParts[1];
+        if ($endMinutes < $startMinutes) {
+            $endMinutes += 24 * 60;
+        }
+
+        $overlap1 = max(0, min($endMinutes, 21 * 60) - max($startMinutes, 18 * 60));
+        $allowance009 += $overlap1;
+
+        $overlap2 = max(0, min($endMinutes, 24 * 60) - max($startMinutes, 21 * 60));
+        $allowance018 += $overlap2;
+
+        $overlap3 = 0;
+        if ($endMinutes > 24 * 60) {
+            $overlap3 = max(0, min($endMinutes, 24 * 60 + 6 * 60) - max($startMinutes, 24 * 60));
+        } elseif ($startMinutes < 6 * 60) {
+            $overlap3 = max(0, min($endMinutes, 6 * 60) - max($startMinutes, 0));
+        }
+        $allowance030 += $overlap3;
+    }
+
+    return [
+        'allowance009' => $allowance009 / 60,
+        'allowance018' => $allowance018 / 60,
+        'allowance030' => $allowance030 / 60,
+    ];
+}
+
 // Timesheets die overlappen: Ending_Date ge from AND Starting_Date le to
 $filterDecoded = "Ending_Date ge $from and Starting_Date le $to";
 $filter = rawurlencode($filterDecoded);
@@ -258,6 +337,7 @@ foreach ($byPerson as $personNo => &$person) {
     foreach ($person['weeks'] as $tsNo => &$week) {
         $pairKey = $personNo . '|' . $tsNo;
         $week['expenses'] = $expensesByPair[$pairKey] ?? $expenseDefaults;
+        $week['allowances'] = calculate_time_allowances_for_week($week, (array) ($person['webfleet'] ?? []));
     }
     unset($week);
 }
@@ -286,25 +366,62 @@ if ((string) ($_GET['export'] ?? '') === 'csv') {
     }
 
     fwrite($out, "\xEF\xBB\xBF");
-    fwrite($out, "sep=;\r\n");
-    fputcsv($out, ['Naam', 'Totaal 28.5%', 'Totaal 47%', 'Totaal 85%'], ';');
+    fputcsv($out, ['personeelsnummer', 'Naam', 'Totaal 28.5%', 'Totaal 47%', 'Totaal 85%', '100% uren', 'meeruren', 'Tsl 18/21', 'Tsl 21/24', 'Tsl 00/06', 'Lunch', 'Diner', 'Koffie', 'Weekend', 'Scheiding', 'Buitenland', 'Nacht'], ';');
+    fputcsv($out, ['ADP Rubriek', '', 'V161', 'V162', 'V163', 'V165', 'V166', 'V174', 'V175', 'V176', 'V407', 'V408', 'V409', 'V410', 'V11', 'V412', 'V419'], ';');
 
     foreach ($byPerson as $person) {
         $tot285 = 0;
         $tot47 = 0;
         $tot85 = 0;
+        $tot009 = 0.0;
+        $tot018 = 0.0;
+        $tot030 = 0.0;
+        $totLunch = 0;
+        $totDinner = 0;
+        $totCoffee = 0;
+        $totWeekend = 0;
+        $totScheiding = 0;
+        $totBuitenland = 0;
+        $totNacht = 0;
 
         foreach ($person['weeks'] as $w) {
             $tot285 += (int) ($w['p285'] ?? 0);
             $tot47 += (int) ($w['p47'] ?? 0);
             $tot85 += (int) ($w['p85'] ?? 0);
+
+            $allowances = (array) ($w['allowances'] ?? ['allowance009' => 0, 'allowance018' => 0, 'allowance030' => 0]);
+            $tot009 += (float) ($allowances['allowance009'] ?? 0);
+            $tot018 += (float) ($allowances['allowance018'] ?? 0);
+            $tot030 += (float) ($allowances['allowance030'] ?? 0);
+
+            $expenses = (array) ($w['expenses'] ?? []);
+            $totLunch += max(0, (int) ($expenses['lunch'] ?? 0));
+            $totDinner += max(0, (int) ($expenses['dinner'] ?? 0));
+            $totCoffee += max(0, (int) ($expenses['coffee'] ?? 0));
+            $totWeekend += max(0, (int) ($expenses['weekend'] ?? 0));
+            $totScheiding += max(0, (int) ($expenses['separation_lt_eu'] ?? 0));
+            $totBuitenland += max(0, (int) ($expenses['separation_gt_eu'] ?? 0));
+            $totNacht += max(0, (int) ($expenses['night'] ?? 0));
         }
 
         fputcsv($out, [
+            (string) ($person['personNo'] ?? ''),
             (string) ($person['name'] ?? ''),
-            round_to_quarters($tot285 / 60),
-            round_to_quarters($tot47 / 60),
-            round_to_quarters($tot85 / 60),
+            csv_decimal_quarters($tot285 / 60),
+            csv_decimal_quarters($tot47 / 60),
+            csv_decimal_quarters($tot85 / 60),
+            '',
+            '',
+            csv_decimal_quarters($tot009),
+            csv_decimal_quarters($tot018),
+            csv_decimal_quarters($tot030),
+            (string) $totLunch,
+            (string) $totDinner,
+            (string) $totCoffee,
+            (string) $totWeekend,
+            (string) $totScheiding,
+            (string) $totBuitenland,
+            (string) $totNacht,
         ], ';');
     }
 
@@ -849,86 +966,6 @@ function hhmm(int $min): string
                 total85 += (week.p85 || 0) / 60;
             });
 
-            // Calculate time-based allowances from webfleet data
-            function calculateTimeAllowances (week, webfleetData)
-            {
-                let allowance009 = 0; // 18:00-21:00
-                let allowance018 = 0; // 21:00-24:00
-                let allowance030 = 0; // 00:00-06:00
-
-                if (!webfleetData || !Array.isArray(webfleetData)) return { allowance009, allowance018, allowance030 };
-
-                // Get webfleet entries for this week's dates
-                const weekStart = new Date(week.weekStart);
-                const weekDates = [];
-                for (let d = 0; d < 7; d++)
-                {
-                    const date = new Date(weekStart);
-                    date.setDate(weekStart.getDate() + d);
-                    weekDates.push(date.toISOString().split('T')[0]);
-                }
-
-                webfleetData.forEach(wf =>
-                {
-                    const activityDate = wf.KVT_Date_Webfleet_Activity;
-                    if (!weekDates.includes(activityDate)) return;
-
-                    // Only process SNT (standard normal time) and empty work types - skip overtime and KM
-                    const workType = wf.Work_Type_Code || '';
-                    if (workType === 'SOT125' || workType === 'SOT150' || workType === 'SOT200' || workType === 'KM') return;
-                    // Only include SNT or empty work type (normal work hours)
-                    if (workType !== '' && workType !== 'SNT') return;
-
-                    // Only process if we have valid start/end times
-                    const startTime = wf.KVT_Start_time_Webfleet_Act;
-                    const endTime = wf.KVT_End_time_Webfleet_Act;
-                    if (!startTime || !endTime || startTime === '00:00:00' && endTime === '00:00:00') return;
-
-                    // Parse times
-                    const [startH, startM] = startTime.split(':').map(Number);
-                    const [endH, endM] = endTime.split(':').map(Number);
-                    const startMinutes = startH * 60 + startM;
-                    let endMinutes = endH * 60 + endM;
-
-                    // Handle overnight shifts
-                    if (endMinutes < startMinutes) endMinutes += 24 * 60;
-
-                    // Calculate overlap with each time bracket
-                    // 18:00-21:00 (1080-1260 minutes)
-                    const bracket1Start = 18 * 60;
-                    const bracket1End = 21 * 60;
-                    const overlap1 = Math.max(0, Math.min(endMinutes, bracket1End) - Math.max(startMinutes, bracket1Start));
-                    allowance009 += overlap1;
-
-                    // 21:00-24:00 (1260-1440 minutes)
-                    const bracket2Start = 21 * 60;
-                    const bracket2End = 24 * 60;
-                    const overlap2 = Math.max(0, Math.min(endMinutes, bracket2End) - Math.max(startMinutes, bracket2Start));
-                    allowance018 += overlap2;
-
-                    // 00:00-06:00 (0-360 minutes or 1440-1800 for overnight)
-                    const bracket3Start = 0;
-                    const bracket3End = 6 * 60;
-                    let overlap3 = 0;
-                    if (endMinutes > 24 * 60)
-                    {
-                        // Overnight: check 24:00-30:00 range (mapped to 00:00-06:00)
-                        overlap3 = Math.max(0, Math.min(endMinutes, 24 * 60 + bracket3End) - Math.max(startMinutes, 24 * 60));
-                    } else if (startMinutes < bracket3End)
-                    {
-                        // Regular early morning
-                        overlap3 = Math.max(0, Math.min(endMinutes, bracket3End) - Math.max(startMinutes, bracket3Start));
-                    }
-                    allowance030 += overlap3;
-                });
-
-                return {
-                    allowance009: allowance009 / 60,
-                    allowance018: allowance018 / 60,
-                    allowance030: allowance030 / 60
-                };
-            }
-
             // Build hours per week rows
             let hours285Cells = '';
             let hours47Cells = '';
@@ -956,11 +993,11 @@ function hhmm(int $min): string
                 hours47Cells += `<td>${h47 > 0 ? round_to_quarters(h47) : ''}</td>`;
                 hours85Cells += `<td>${h85 > 0 ? round_to_quarters(h85) : ''}</td>`;
 
-                // Calculate time-based allowances
-                const allowances = calculateTimeAllowances(week, person.webfleet);
-                total009 += allowances.allowance009;
-                total018 += allowances.allowance018;
-                total030 += allowances.allowance030;
+                // Use centrally calculated time-based allowances
+                const allowances = week.allowances || { allowance009: 0, allowance018: 0, allowance030: 0 };
+                total009 += Number(allowances.allowance009 || 0);
+                total018 += Number(allowances.allowance018 || 0);
+                total030 += Number(allowances.allowance030 || 0);
 
                 const weekExpenses = week.expenses || {};
                 Object.keys(expenseRows).forEach(key =>

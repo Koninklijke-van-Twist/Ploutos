@@ -450,6 +450,19 @@ function hhmm(int $min): string
             noprint {
                 display: none !important;
             }
+
+            .card {
+                break-inside: avoid-page;
+                page-break-inside: avoid;
+            }
+
+            table,
+            thead,
+            tbody,
+            tr {
+                break-inside: avoid;
+                page-break-inside: avoid;
+            }
         }
 
         body {
@@ -895,6 +908,92 @@ function hhmm(int $min): string
                             </td>
                             <td class="right <?= $totVer == 0 ? "zeroTotal" : "" ?>"><?= htmlspecialchars(eur($totVer)) ?>
                             </td>
+                        </tr>
+                    </tfoot>
+                </table>
+
+                <table style="margin-top:12px;">
+                    <thead>
+                        <tr>
+                            <th></th>
+                            <th>Weeknummer</th>
+                            <th>#</th>
+                            <th class="right">Lunch</th>
+                            <th class="right">Diner</th>
+                            <th class="right">Koffie</th>
+                            <th class="right">Weekend</th>
+                            <th class="right">Scheiding</th>
+                            <th class="right">Buitenland</th>
+                            <th class="right">Nacht</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php
+                        $j = 0;
+                        $totLunchW = 0;
+                        $totDinnerW = 0;
+                        $totCoffeeW = 0;
+                        $totWeekendW = 0;
+                        $totScheidingW = 0;
+                        $totBuitenlandW = 0;
+                        $totNachtW = 0;
+                        ?>
+                        <?php foreach ($person['weeks'] as $w): ?>
+                            <?php
+                            $j++;
+                            $weekExpenses = (array) ($w['expenses'] ?? []);
+                            $valLunch = max(0, (int) ($weekExpenses['lunch'] ?? 0));
+                            $valDinner = max(0, (int) ($weekExpenses['dinner'] ?? 0));
+                            $valCoffee = max(0, (int) ($weekExpenses['coffee'] ?? 0));
+                            $valWeekend = max(0, (int) ($weekExpenses['weekend'] ?? 0));
+                            $valScheiding = max(0, (int) ($weekExpenses['separation_lt_eu'] ?? 0));
+                            $valBuitenland = max(0, (int) ($weekExpenses['separation_gt_eu'] ?? 0));
+                            $valNacht = max(0, (int) ($weekExpenses['night'] ?? 0));
+
+                            $totLunchW += $valLunch;
+                            $totDinnerW += $valDinner;
+                            $totCoffeeW += $valCoffee;
+                            $totWeekendW += $valWeekend;
+                            $totScheidingW += $valScheiding;
+                            $totBuitenlandW += $valBuitenland;
+                            $totNachtW += $valNacht;
+
+                            $weekEditExpensesUrl = "onkosten_editor.php?resourceNo=" . rawurlencode($person['personNo'])
+                                . "&from=" . rawurlencode($from)
+                                . "&to=" . rawurlencode($to)
+                                . ($month !== '' ? "&month=" . rawurlencode($month) : '')
+                                . "&returnPage=overzicht"
+                                . "&returnTsNo=" . rawurlencode((string) ($w['tsNo'] ?? ''));
+                            ?>
+                            <tr>
+                                <td>
+                                    <a class="btn" href="<?= htmlspecialchars($weekEditExpensesUrl) ?>">
+                                        <noprint>Bewerk</noprint>&nbsp;
+                                    </a>
+                                </td>
+                                <td><?= (int) $w['weekNo'] ?> <span
+                                        class="muted">(<?= formatDate(htmlspecialchars($w['weekStart'])) ?>)</span></td>
+                                <td><?= $j ?></td>
+                                <td class="right <?= $valLunch === 0 ? 'zeroTotal' : '' ?>"><?= $valLunch ?></td>
+                                <td class="right <?= $valDinner === 0 ? 'zeroTotal' : '' ?>"><?= $valDinner ?></td>
+                                <td class="right <?= $valCoffee === 0 ? 'zeroTotal' : '' ?>"><?= $valCoffee ?></td>
+                                <td class="right <?= $valWeekend === 0 ? 'zeroTotal' : '' ?>"><?= $valWeekend ?></td>
+                                <td class="right <?= $valScheiding === 0 ? 'zeroTotal' : '' ?>"><?= $valScheiding ?></td>
+                                <td class="right <?= $valBuitenland === 0 ? 'zeroTotal' : '' ?>"><?= $valBuitenland ?></td>
+                                <td class="right <?= $valNacht === 0 ? 'zeroTotal' : '' ?>"><?= $valNacht ?></td>
+                            </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                    <tfoot>
+                        <tr>
+                            <td colspan="3">Totalen</td>
+                            <td class="right <?= $totLunchW === 0 ? 'zeroTotal' : '' ?>"><?= $totLunchW ?></td>
+                            <td class="right <?= $totDinnerW === 0 ? 'zeroTotal' : '' ?>"><?= $totDinnerW ?></td>
+                            <td class="right <?= $totCoffeeW === 0 ? 'zeroTotal' : '' ?>"><?= $totCoffeeW ?></td>
+                            <td class="right <?= $totWeekendW === 0 ? 'zeroTotal' : '' ?>"><?= $totWeekendW ?></td>
+                            <td class="right <?= $totScheidingW === 0 ? 'zeroTotal' : '' ?>"><?= $totScheidingW ?></td>
+                            <td class="right <?= $totBuitenlandW === 0 ? 'zeroTotal' : '' ?>"><?= $totBuitenlandW ?></td>
+                            <td class="right <?= $totNachtW === 0 ? 'zeroTotal' : '' ?>"><?= $totNachtW ?></td>
                         </tr>
                     </tfoot>
                 </table>

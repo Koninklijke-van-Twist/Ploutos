@@ -10,19 +10,6 @@ require __DIR__ . "/logincheck.php";
 $hour = 3600;
 $day = $hour * 24;
 
-$now = new DateTimeImmutable("now");
-$from = $now->modify("-24 months")->format("Y-m-d");
-
-// Timesheets in range (light)
-$filter = rawurlencode("Starting_Date ge $from");
-$url = $base . "Urenstaten?\$select=No,Starting_Date,Ending_Date&\$filter={$filter}&\$format=json";
-$rows = [];
-try {
-    $rows = odata_get_all($url, $auth, $day);
-} catch (Exception $e) {
-    $rows = [];
-}
-
 function odata_or_filter(string $field, array $values): string
 {
     $parts = array_map(fn($v) => "$field eq '" . str_replace("'", "''", $v) . "'", $values);
@@ -78,65 +65,85 @@ function odata_fetch_by_or_filter_safe(string $base, string $entity, string $sel
     return $rows;
 }
 
-$timesheetsByNo = [];
-$tsNos = [];
-foreach ($rows as $r) {
-    $no = (string) ($r['No'] ?? '');
-    if ($no === '') {
-        continue;
+function get_valid_months(array $auth, string $base, int $day): array
+{
+    $now = new DateTimeImmutable("now");
+    $from = $now->modify("-24 months")->format("Y-m-d");
+
+    $filter = rawurlencode("Starting_Date ge $from");
+    $url = $base . "Urenstaten?\$select=No,Starting_Date,Ending_Date&\$filter={$filter}&\$format=json";
+    $rows = odata_get_all($url, $auth, $day);
+
+    $timesheetsByNo = [];
+    $tsNos = [];
+    foreach ($rows as $r) {
+        $no = (string) ($r['No'] ?? '');
+        if ($no === '') {
+            continue;
+        }
+        $timesheetsByNo[$no] = $r;
+        $tsNos[] = $no;
     }
-    $timesheetsByNo[$no] = $r;
-    $tsNos[] = $no;
+
+    $lines = odata_fetch_by_or_filter_safe($base, 'Urenstaatregels', 'Time_Sheet_No,Status', 'Time_Sheet_No', $tsNos, $auth, 3600);
+    $validTsNos = [];
+    foreach ($lines as $line) {
+        if ((string) ($line['Status'] ?? '') !== 'Approved') {
+            continue;
+        }
+
+        $lineTsNo = (string) ($line['Time_Sheet_No'] ?? '');
+        if ($lineTsNo !== '') {
+            $validTsNos[$lineTsNo] = true;
+        }
+    }
+
+    $months = [];
+    foreach ($timesheetsByNo as $tsNo => $r) {
+        if (!isset($validTsNos[$tsNo])) {
+            continue;
+        }
+
+        $sd = (string) ($r['Starting_Date'] ?? '');
+        $ed = (string) ($r['Ending_Date'] ?? '');
+        if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $sd) || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $ed)) {
+            continue;
+        }
+
+        try {
+            $start = new DateTimeImmutable($sd);
+            $end = new DateTimeImmutable($ed);
+        } catch (Exception $e) {
+            continue;
+        }
+
+        if ($end < $start) {
+            continue;
+        }
+
+        $cursor = $start->modify('first day of this month');
+        $lastMonth = $end->modify('first day of this month');
+
+        while ($cursor <= $lastMonth) {
+            $months[$cursor->format('Y-m')] = true;
+            $cursor = $cursor->modify('+1 month');
+        }
+    }
+
+    $monthList = array_keys($months);
+    rsort($monthList);
+    return $monthList;
 }
 
-$lines = odata_fetch_by_or_filter_safe($base, 'Urenstaatregels', 'Time_Sheet_No,Status', 'Time_Sheet_No', $tsNos, $auth, 0);
-$validTsNos = [];
-foreach ($lines as $line) {
-    if ((string) ($line['Status'] ?? '') !== 'Approved') {
-        continue;
-    }
-
-    $lineTsNo = (string) ($line['Time_Sheet_No'] ?? '');
-    if ($lineTsNo !== '') {
-        $validTsNos[$lineTsNo] = true;
-    }
-}
-
-// Bouw maandlijst op basis van overlap met urenstaat-periodes
-$months = []; // 'YYYY-MM' => true
-foreach ($timesheetsByNo as $tsNo => $r) {
-    if (!isset($validTsNos[$tsNo])) {
-        continue;
-    }
-
-    $sd = (string) ($r['Starting_Date'] ?? '');
-    $ed = (string) ($r['Ending_Date'] ?? '');
-    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $sd) || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $ed)) {
-        continue;
-    }
-
+if ((string) ($_GET['action'] ?? '') === 'months') {
+    header('Content-Type: application/json; charset=UTF-8');
     try {
-        $start = new DateTimeImmutable($sd);
-        $end = new DateTimeImmutable($ed);
+        echo json_encode(['ok' => true, 'months' => get_valid_months($auth, $base, $day)], JSON_UNESCAPED_UNICODE);
     } catch (Exception $e) {
-        continue;
+        echo json_encode(['ok' => false, 'months' => []], JSON_UNESCAPED_UNICODE);
     }
-
-    if ($end < $start) {
-        continue;
-    }
-
-    $cursor = $start->modify('first day of this month');
-    $lastMonth = $end->modify('first day of this month');
-
-    while ($cursor <= $lastMonth) {
-        $months[$cursor->format('Y-m')] = true;
-        $cursor = $cursor->modify('+1 month');
-    }
+    exit;
 }
-
-$monthList = array_keys($months);
-rsort($monthList); // nieuwste eerst
 ?>
 <!doctype html>
 <html lang="nl">
@@ -209,6 +216,52 @@ rsort($monthList); // nieuwste eerst
             color: #64748b;
             font-size: 13px
         }
+
+        .progress-wrap {
+            margin-top: 8px;
+            display: none;
+        }
+
+        .progress-wrap.active {
+            display: block;
+        }
+
+        .progress-track {
+            width: 100%;
+            height: 8px;
+            background: #e2e8f0;
+            border-radius: 999px;
+            overflow: hidden;
+        }
+
+        .progress-fill {
+            height: 100%;
+            width: 0%;
+            background: #4338ca;
+            transition: width 200ms linear;
+        }
+
+        .page-loader {
+            position: fixed;
+            inset: 0;
+            background: rgba(15, 23, 42, 0.45);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 2000;
+        }
+
+        .page-loader.active {
+            display: flex;
+        }
+
+        .page-loader-box {
+            background: #fff;
+            border-radius: 12px;
+            padding: 16px 20px;
+            font-weight: 700;
+            color: #0f172a;
+        }
     </style>
     <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
     <link rel="icon" type="image/png" sizes="32x32" href="favicon-32x32.png">
@@ -218,19 +271,25 @@ rsort($monthList); // nieuwste eerst
 </head>
 
 <body>
+    <div id="pageLoader" class="page-loader" aria-live="polite" aria-busy="true">
+        <div class="page-loader-box">Bezig met laden…</div>
+    </div>
     <div class="wrap">
         <noprint><a href="feestdagen.php">Beheer Feestdagen</a></noprint>
         <h1>Overzicht genereren</h1>
         <p class="hint">Kies een maand, of geef een periode op.</p>
 
-        <form method="get" action="overzicht.php">
+        <form id="overviewForm" method="get" action="overzicht.php">
             <label>Maand</label>
-            <select name="month">
-                <option value="">— Kies maand —</option>
-                <?php foreach ($monthList as $ym): ?>
-                    <option value="<?= htmlspecialchars($ym) ?>"><?= htmlspecialchars($ym) ?></option>
-                <?php endforeach; ?>
+            <select id="monthSelect" name="month" disabled>
+                <option value="">Maanden laden…</option>
             </select>
+            <div id="monthStatus" class="hint">Maanden worden opgehaald uit Business Central…</div>
+            <div id="monthProgressWrap" class="progress-wrap active" aria-hidden="false">
+                <div class="progress-track">
+                    <div id="monthProgressFill" class="progress-fill"></div>
+                </div>
+            </div>
 
             <hr class="sep">
 
@@ -248,6 +307,204 @@ rsort($monthList); // nieuwste eerst
             <button type="submit">Toon overzicht</button>
         </form>
     </div>
+
+    <script>
+        (function ()
+        {
+            const monthSelect = document.getElementById('monthSelect');
+            const monthStatus = document.getElementById('monthStatus');
+            const monthProgressWrap = document.getElementById('monthProgressWrap');
+            const monthProgressFill = document.getElementById('monthProgressFill');
+            const form = document.getElementById('overviewForm');
+            const loader = document.getElementById('pageLoader');
+
+            // Instelblok voor voortgangsbalk-pauzes
+            const monthProgressConfig = {
+                minPauseCount: 8,
+                maxPauseCount: 24,
+                minPauseMs: 180,
+                maxPauseMs: 3720,
+                tickMs: 180,
+                milestones: [9, 13, 18, 24, 27, 33, 39, 44, 48, 55, 61, 66, 71, 77, 82, 86, 89, 92]
+            };
+
+            let monthProgressTimer = null;
+            let monthProgressValue = 0;
+            let monthProgressStepIndex = 0;
+            let monthProgressPauseUntil = 0;
+            let monthProgressPausePlan = new Map();
+            let monthReachedWaitState = false;
+
+            function randomInt (min, max)
+            {
+                return Math.floor(Math.random() * (max - min + 1)) + min;
+            }
+
+            function buildPausePlan (milestoneCount)
+            {
+                const plan = new Map();
+                if (milestoneCount <= 0)
+                {
+                    return plan;
+                }
+
+                const minCount = Math.max(0, Math.min(monthProgressConfig.minPauseCount, milestoneCount));
+                const maxCount = Math.max(minCount, Math.min(monthProgressConfig.maxPauseCount, milestoneCount));
+                const pauseCount = randomInt(minCount, maxCount);
+                const used = new Set();
+
+                while (used.size < pauseCount)
+                {
+                    const stepIndex = randomInt(0, milestoneCount - 1);
+                    used.add(stepIndex);
+                }
+
+                used.forEach(function (stepIndex)
+                {
+                    plan.set(stepIndex, randomInt(monthProgressConfig.minPauseMs, monthProgressConfig.maxPauseMs));
+                });
+
+                return plan;
+            }
+
+            function showLoader ()
+            {
+                loader?.classList.add('active');
+            }
+
+            function hideLoader ()
+            {
+                loader?.classList.remove('active');
+            }
+
+            function setMonthOptions (months)
+            {
+                monthSelect.innerHTML = '';
+
+                const placeholder = document.createElement('option');
+                placeholder.value = '';
+                placeholder.textContent = '— Kies maand —';
+                monthSelect.appendChild(placeholder);
+
+                months.forEach((ym) =>
+                {
+                    const opt = document.createElement('option');
+                    opt.value = ym;
+                    opt.textContent = ym;
+                    monthSelect.appendChild(opt);
+                });
+
+                monthSelect.disabled = false;
+                monthStatus.textContent = months.length > 0
+                    ? 'Alleen maanden met geldige urenstaatregels worden getoond.'
+                    : 'Geen geldige maanden gevonden.';
+            }
+
+            function startMonthProgress ()
+            {
+                monthProgressValue = 6;
+                monthProgressStepIndex = 0;
+                monthProgressPauseUntil = 0;
+                monthReachedWaitState = false;
+                monthProgressWrap?.classList.add('active');
+                if (monthProgressFill)
+                {
+                    monthProgressFill.style.width = `${monthProgressValue}%`;
+                }
+                monthStatus.textContent = 'Maanden worden opgehaald uit Business Central…';
+
+                if (monthProgressTimer)
+                {
+                    clearInterval(monthProgressTimer);
+                }
+
+                monthProgressPausePlan = buildPausePlan(monthProgressConfig.milestones.length);
+
+                monthProgressTimer = setInterval(function ()
+                {
+                    if (Date.now() < monthProgressPauseUntil)
+                    {
+                        return;
+                    }
+
+                    if (monthProgressStepIndex < monthProgressConfig.milestones.length)
+                    {
+                        monthProgressValue = monthProgressConfig.milestones[monthProgressStepIndex];
+                        const pauseMs = monthProgressPausePlan.get(monthProgressStepIndex) ?? 0;
+                        if (pauseMs > 0)
+                        {
+                            monthProgressPauseUntil = Date.now() + pauseMs;
+                        }
+                        monthProgressStepIndex++;
+                    }
+
+                    if (monthProgressFill)
+                    {
+                        monthProgressFill.style.width = `${monthProgressValue}%`;
+                    }
+
+                    if (!monthReachedWaitState && monthProgressValue >= 92)
+                    {
+                        monthReachedWaitState = true;
+                        monthStatus.textContent = 'Maanden worden opgehaald uit Business Central… cache opbouwen…';
+                    }
+                }, monthProgressConfig.tickMs);
+            }
+
+            function finishMonthProgress ()
+            {
+                if (monthProgressTimer)
+                {
+                    clearInterval(monthProgressTimer);
+                    monthProgressTimer = null;
+                }
+
+                if (monthProgressFill)
+                {
+                    monthProgressFill.style.width = '100%';
+                }
+
+                monthProgressWrap?.classList.remove('active');
+            }
+
+            async function loadMonths ()
+            {
+                startMonthProgress();
+                try
+                {
+                    const response = await fetch('index.php?action=months', { cache: 'no-store' });
+                    const payload = await response.json();
+
+                    if (!payload || !Array.isArray(payload.months))
+                    {
+                        throw new Error('Invalid months payload');
+                    }
+
+                    setMonthOptions(payload.months);
+                } catch (e)
+                {
+                    monthSelect.innerHTML = '<option value="">— Kies maand —</option>';
+                    monthSelect.disabled = false;
+                    monthStatus.textContent = 'Maanden laden mislukt. Gebruik eventueel datum-range.';
+                } finally
+                {
+                    finishMonthProgress();
+                }
+            }
+
+            form?.addEventListener('submit', function ()
+            {
+                showLoader();
+            });
+
+            window.addEventListener('pageshow', function ()
+            {
+                hideLoader();
+            });
+
+            loadMonths();
+        })();
+    </script>
 </body>
 
 </html>

@@ -784,6 +784,28 @@ function hhmm(int $min): string
             height: 200px;
         }
 
+        .page-loader {
+            position: fixed;
+            inset: 0;
+            background: rgba(15, 23, 42, 0.45);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 1500;
+        }
+
+        .page-loader.active {
+            display: flex;
+        }
+
+        .page-loader-box {
+            background: #fff;
+            border-radius: 12px;
+            padding: 16px 20px;
+            font-weight: 700;
+            color: #0f172a;
+        }
+
         @media (max-width: 900px) {
             .print-modal-content {
                 width: 100%;
@@ -836,6 +858,7 @@ function hhmm(int $min): string
     <?php $expenseColumns = expense_export_columns(); ?>
     <div class="wrap">
         <noprint>
+            <a class="btn js-nav-loading" href="index.php">← Terug naar selectie</a>
             <a class="btn" href="feestdagen.php">Beheer Feestdagen</a>
             <?php
             $exportUrl = 'overzicht.php?export=csv';
@@ -911,7 +934,7 @@ function hhmm(int $min): string
                             ?>
                             <tr>
                                 <td>
-                                    <a class="btn" href="<?= htmlspecialchars($inspectUrl) ?>">
+                                    <a class="btn js-nav-loading" href="<?= htmlspecialchars($inspectUrl) ?>">
                                         <noprint>Bekijk <?= $w['lines'] ?></noprint>&nbsp;
                                     </a>
                                 </td>
@@ -1046,6 +1069,10 @@ function hhmm(int $min): string
         <?php endforeach; ?>
     </div>
 
+    <div id="pageLoader" class="page-loader" aria-live="polite" aria-busy="true">
+        <div class="page-loader-box">Bezig met laden…</div>
+    </div>
+
     <!-- Print Modal -->
     <div id="printModal" class="print-modal">
         <div class="print-modal-content">
@@ -1058,6 +1085,37 @@ function hhmm(int $min): string
     </div>
 
     <script>
+        function showPageLoader ()
+        {
+            document.getElementById('pageLoader')?.classList.add('active');
+        }
+
+        function hidePageLoader ()
+        {
+            document.getElementById('pageLoader')?.classList.remove('active');
+        }
+
+        document.querySelectorAll('a.js-nav-loading').forEach(function (link)
+        {
+            link.addEventListener('click', function (event)
+            {
+                if (event.defaultPrevented)
+                {
+                    return;
+                }
+                if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey)
+                {
+                    return;
+                }
+                showPageLoader();
+            });
+        });
+
+        window.addEventListener('pageshow', function ()
+        {
+            hidePageLoader();
+        });
+
         function round_to_quarters (h)
         {
             const value = Number(h);

@@ -54,14 +54,14 @@ function csv_decimal_quarters(float $h): string
 function expense_export_columns(): array
 {
     return [
-        ['key' => 'coffee', 'label' => 'Koffie', 'adp' => 'V409'],
         ['key' => 'lunch', 'label' => 'Lunch', 'adp' => 'V407'],
         ['key' => 'dinner', 'label' => 'Diner', 'adp' => 'V408'],
-        ['key' => 'separation_lt_eu', 'label' => '<EU', 'adp' => 'V11'],
-        ['key' => 'separation_gt_eu', 'label' => '>EU', 'adp' => 'V412'],
+        ['key' => 'coffee', 'label' => 'Koffie', 'adp' => 'V409'],
         ['key' => 'weekend', 'label' => 'Weekend', 'adp' => 'V410'],
-        ['key' => 'on_call', 'label' => 'Consignatie', 'adp' => ''],
+        ['key' => 'separation', 'label' => 'Scheiding', 'adp' => 'V11'],
+        ['key' => 'foreign', 'label' => 'Buitenland', 'adp' => 'V412'],
         ['key' => 'night', 'label' => 'Nacht', 'adp' => 'V419'],
+        ['key' => 'on_call', 'label' => 'Consignatie', 'adp' => 'V??'],
     ];
 }
 
@@ -448,8 +448,10 @@ if ((string) ($_GET['export'] ?? '') === 'csv') {
             $tot030 += (float) ($allowances['allowance030'] ?? 0);
 
             $expenses = (array) ($w['expenses'] ?? []);
+            $expenses["separation"] = $expenses["separation_gt_eu"] + $expenses["separation_lt_eu"];
             foreach ($expenseColumns as $column) {
                 $expenseKey = (string) ($column['key'] ?? '');
+
                 if ($expenseKey === '' || !array_key_exists($expenseKey, $expenseTotals)) {
                     continue;
                 }

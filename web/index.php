@@ -1,4 +1,8 @@
 <?php
+ini_set('display_errors', 1);
+ini_set('display_startup_errors', 1);
+error_reporting(E_ALL);
+
 require __DIR__ . "/odata.php";
 require __DIR__ . "/auth.php";
 require __DIR__ . "/logincheck.php";
@@ -12,15 +16,122 @@ $from = $now->modify("-24 months")->format("Y-m-d");
 // Timesheets in range (light)
 $filter = rawurlencode("Starting_Date ge $from");
 $url = $base . "Urenstaten?\$select=No,Starting_Date,Ending_Date&\$filter={$filter}&\$format=json";
-$rows = odata_get_all($url, $auth, $day);
+$rows = [];
+try {
+    $rows = odata_get_all($url, $auth, $day);
+} catch (Exception $e) {
+    $rows = [];
+}
 
-// Bouw maandlijst op basis van Starting_Date (weekstart)
-$months = []; // 'YYYY-MM' => true
+function odata_or_filter(string $field, array $values): string
+{
+    $parts = array_map(fn($v) => "$field eq '" . str_replace("'", "''", $v) . "'", $values);
+    return rawurlencode(implode(" or ", $parts));
+}
+
+function odata_fetch_by_or_filter(string $base, string $entity, string $select, string $field, array $values, array $auth, int $ttl, int $chunkSize = 60): array
+{
+    $values = array_values(array_unique(array_filter(array_map(fn($v) => (string) $v, $values), fn($v) => $v !== '')));
+    if (!$values) {
+        return [];
+    }
+
+    $rows = [];
+    foreach (array_chunk($values, $chunkSize) as $chunk) {
+        $filter = odata_or_filter($field, $chunk);
+        if ($filter === '') {
+            continue;
+        }
+        $url = $base . $entity . "?\$select={$select}&\$filter={$filter}&\$format=json";
+        $chunkRows = odata_get_all($url, $auth, $ttl);
+        if ($chunkRows) {
+            foreach ($chunkRows as $row) {
+                $rows[] = $row;
+            }
+        }
+    }
+
+    return $rows;
+}
+
+function odata_fetch_by_or_filter_safe(string $base, string $entity, string $select, string $field, array $values, array $auth, int $ttl, int $chunkSize = 40): array
+{
+    $values = array_values(array_unique(array_filter(array_map(fn($v) => (string) $v, $values), fn($v) => $v !== '')));
+    if (!$values) {
+        return [];
+    }
+
+    $rows = [];
+    foreach (array_chunk($values, $chunkSize) as $chunk) {
+        try {
+            $chunkRows = odata_fetch_by_or_filter($base, $entity, $select, $field, $chunk, $auth, $ttl, $chunkSize);
+            if ($chunkRows) {
+                foreach ($chunkRows as $row) {
+                    $rows[] = $row;
+                }
+            }
+        } catch (Exception $e) {
+            continue;
+        }
+    }
+
+    return $rows;
+}
+
+$timesheetsByNo = [];
+$tsNos = [];
 foreach ($rows as $r) {
+    $no = (string) ($r['No'] ?? '');
+    if ($no === '') {
+        continue;
+    }
+    $timesheetsByNo[$no] = $r;
+    $tsNos[] = $no;
+}
+
+$lines = odata_fetch_by_or_filter_safe($base, 'Urenstaatregels', 'Time_Sheet_No,Status', 'Time_Sheet_No', $tsNos, $auth, 0);
+$validTsNos = [];
+foreach ($lines as $line) {
+    if ((string) ($line['Status'] ?? '') !== 'Approved') {
+        continue;
+    }
+
+    $lineTsNo = (string) ($line['Time_Sheet_No'] ?? '');
+    if ($lineTsNo !== '') {
+        $validTsNos[$lineTsNo] = true;
+    }
+}
+
+// Bouw maandlijst op basis van overlap met urenstaat-periodes
+$months = []; // 'YYYY-MM' => true
+foreach ($timesheetsByNo as $tsNo => $r) {
+    if (!isset($validTsNos[$tsNo])) {
+        continue;
+    }
+
     $sd = (string) ($r['Starting_Date'] ?? '');
-    if ($sd && preg_match('/^\d{4}-\d{2}-\d{2}$/', $sd)) {
-        $ym = substr($sd, 0, 7);
-        $months[$ym] = true;
+    $ed = (string) ($r['Ending_Date'] ?? '');
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $sd) || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $ed)) {
+        continue;
+    }
+
+    try {
+        $start = new DateTimeImmutable($sd);
+        $end = new DateTimeImmutable($ed);
+    } catch (Exception $e) {
+        continue;
+    }
+
+    if ($end < $start) {
+        continue;
+    }
+
+    $cursor = $start->modify('first day of this month');
+    $lastMonth = $end->modify('first day of this month');
+
+    while ($cursor <= $lastMonth) {
+        $months[$cursor->format('Y-m')] = true;
+        $cursor = $cursor->modify('+1 month');
     }
 }
 

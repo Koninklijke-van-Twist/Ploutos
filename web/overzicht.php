@@ -51,6 +51,20 @@ function csv_decimal_quarters(float $h): string
     return str_replace('.', ',', round_to_quarters($h));
 }
 
+function expense_export_columns(): array
+{
+    return [
+        ['key' => 'coffee', 'label' => 'Koffie', 'adp' => 'V409'],
+        ['key' => 'lunch', 'label' => 'Lunch', 'adp' => 'V407'],
+        ['key' => 'dinner', 'label' => 'Diner', 'adp' => 'V408'],
+        ['key' => 'separation_lt_eu', 'label' => '<EU', 'adp' => 'V11'],
+        ['key' => 'separation_gt_eu', 'label' => '>EU', 'adp' => 'V412'],
+        ['key' => 'weekend', 'label' => 'Weekend', 'adp' => 'V410'],
+        ['key' => 'on_call', 'label' => 'Consignatie', 'adp' => ''],
+        ['key' => 'night', 'label' => 'Nacht', 'adp' => 'V419'],
+    ];
+}
+
 function calculate_time_allowances_for_week(array $week, array $webfleetData): array
 {
     $allowance009 = 0; // 18:00-21:00
@@ -145,6 +159,9 @@ foreach ($tsRows as $t) {
     $tsNos[] = $no;
 }
 
+if (!$tsNos)
+    die("Geen geldige urenstaten in dit tijdvak.");
+
 // Helper OR filter
 function odata_or_filter(string $field, array $values): string
 {
@@ -152,10 +169,44 @@ function odata_or_filter(string $field, array $values): string
     return rawurlencode(implode(" or ", $parts));
 }
 
+function odata_fetch_by_or_filter(string $base, string $entity, string $select, string $field, array $values, array $auth, int $ttl, int $chunkSize = 60): array
+{
+    $values = array_values(array_unique(array_filter(array_map(fn($v) => (string) $v, $values), fn($v) => $v !== '')));
+    if (!$values) {
+        return [];
+    }
+
+    $rows = [];
+    foreach (array_chunk($values, $chunkSize) as $chunk) {
+        $filter = odata_or_filter($field, $chunk);
+        if ($filter === '') {
+            continue;
+        }
+        $url = $base . $entity . "?\$select={$select}&\$filter={$filter}&\$format=json";
+        $chunkRows = odata_get_all($url, $auth, $ttl);
+        if ($chunkRows) {
+            foreach ($chunkRows as $row) {
+                $rows[] = $row;
+            }
+        }
+    }
+
+    return $rows;
+}
+
 // Lines voor alle timesheets
-$lineFilter = odata_or_filter("Time_Sheet_No", $tsNos);
-$linesUrl = $base . "Urenstaatregels?\$select=Time_Sheet_No,Status,Header_Resource_No,Work_Type_Code,Job_Task_No,Field1,Field2,Field3,Field4,Field5,Field6,Field7,Total_Quantity&\$filter={$lineFilter}&\$format=json";
-$lines = odata_get_all($linesUrl, $auth, $day);
+$lines = odata_fetch_by_or_filter(
+    $base,
+    'Urenstaatregels',
+    'Time_Sheet_No,Status,Header_Resource_No,Work_Type_Code,Job_Task_No,Field1,Field2,Field3,Field4,Field5,Field6,Field7,Total_Quantity',
+    'Time_Sheet_No',
+    $tsNos,
+    $auth,
+    $day
+);
+
+if (!$lines)
+    die("Geen urenstaatregels in dit tijdvak.");
 
 // Codes voor “onkosten” en “verlet” (pas aan aan jouw BC codes)
 $CODES_ONKOSTEN = ['ONK', 'ONKOST', 'EXP']; // voorbeeld
@@ -173,9 +224,7 @@ $needResNos = array_keys($needRes);
 // Resource lookup (naam, etc.)
 $resourcesByNo = [];
 if ($needResNos) {
-    $rf = odata_or_filter("No", $needResNos);
-    $resUrl = $base . "AppResources?\$select=No,Name&\$filter={$rf}&\$format=json";
-    foreach (odata_get_all($resUrl, $auth, $day) as $r) {
+    foreach (odata_fetch_by_or_filter($base, 'AppResources', 'No,Name', 'No', $needResNos, $auth, $day) as $r) {
         $resourcesByNo[(string) $r['No']] = $r;
     }
 }
@@ -365,9 +414,13 @@ if ((string) ($_GET['export'] ?? '') === 'csv') {
         die('Kon CSV niet genereren.');
     }
 
+    $expenseColumns = expense_export_columns();
+    $expenseLabels = array_map(fn($c) => (string) ($c['label'] ?? ''), $expenseColumns);
+    $expenseAdpCodes = array_map(fn($c) => (string) ($c['adp'] ?? ''), $expenseColumns);
+
     fwrite($out, "\xEF\xBB\xBF");
-    fputcsv($out, ['personeelsnummer', 'Naam', 'Totaal 28.5%', 'Totaal 47%', 'Totaal 85%', '100% uren', 'meeruren', 'Tsl 18/21', 'Tsl 21/24', 'Tsl 00/06', 'Lunch', 'Diner', 'Koffie', 'Weekend', 'Scheiding', 'Buitenland', 'Nacht'], ';');
-    fputcsv($out, ['ADP Rubriek', '', 'V161', 'V162', 'V163', 'V165', 'V166', 'V174', 'V175', 'V176', 'V407', 'V408', 'V409', 'V410', 'V11', 'V412', 'V419'], ';');
+    fputcsv($out, array_merge(['personeelsnummer', 'Naam', 'Totaal 28.5%', 'Totaal 47%', 'Totaal 85%', '100% uren', 'meeruren', 'Tsl 18/21', 'Tsl 21/24', 'Tsl 00/06'], $expenseLabels), ';');
+    fputcsv($out, array_merge(['ADP Rubriek', '', 'V161', 'V162', 'V163', 'V165', 'V166', 'V174', 'V175', 'V176'], $expenseAdpCodes), ';');
 
     foreach ($byPerson as $person) {
         $tot285 = 0;
@@ -376,13 +429,13 @@ if ((string) ($_GET['export'] ?? '') === 'csv') {
         $tot009 = 0.0;
         $tot018 = 0.0;
         $tot030 = 0.0;
-        $totLunch = 0;
-        $totDinner = 0;
-        $totCoffee = 0;
-        $totWeekend = 0;
-        $totScheiding = 0;
-        $totBuitenland = 0;
-        $totNacht = 0;
+        $expenseTotals = [];
+        foreach ($expenseColumns as $column) {
+            $expenseKey = (string) ($column['key'] ?? '');
+            if ($expenseKey !== '') {
+                $expenseTotals[$expenseKey] = 0;
+            }
+        }
 
         foreach ($person['weeks'] as $w) {
             $tot285 += (int) ($w['p285'] ?? 0);
@@ -395,13 +448,19 @@ if ((string) ($_GET['export'] ?? '') === 'csv') {
             $tot030 += (float) ($allowances['allowance030'] ?? 0);
 
             $expenses = (array) ($w['expenses'] ?? []);
-            $totLunch += max(0, (int) ($expenses['lunch'] ?? 0));
-            $totDinner += max(0, (int) ($expenses['dinner'] ?? 0));
-            $totCoffee += max(0, (int) ($expenses['coffee'] ?? 0));
-            $totWeekend += max(0, (int) ($expenses['weekend'] ?? 0));
-            $totScheiding += max(0, (int) ($expenses['separation_lt_eu'] ?? 0));
-            $totBuitenland += max(0, (int) ($expenses['separation_gt_eu'] ?? 0));
-            $totNacht += max(0, (int) ($expenses['night'] ?? 0));
+            foreach ($expenseColumns as $column) {
+                $expenseKey = (string) ($column['key'] ?? '');
+                if ($expenseKey === '' || !array_key_exists($expenseKey, $expenseTotals)) {
+                    continue;
+                }
+                $expenseTotals[$expenseKey] += max(0, (int) ($expenses[$expenseKey] ?? 0));
+            }
+        }
+
+        $expenseValues = [];
+        foreach ($expenseColumns as $column) {
+            $expenseKey = (string) ($column['key'] ?? '');
+            $expenseValues[] = (string) ($expenseTotals[$expenseKey] ?? 0);
         }
 
         fputcsv($out, [
@@ -415,13 +474,7 @@ if ((string) ($_GET['export'] ?? '') === 'csv') {
             csv_decimal_quarters($tot009),
             csv_decimal_quarters($tot018),
             csv_decimal_quarters($tot030),
-            (string) $totLunch,
-            (string) $totDinner,
-            (string) $totCoffee,
-            (string) $totWeekend,
-            (string) $totScheiding,
-            (string) $totBuitenland,
-            (string) $totNacht,
+            ...$expenseValues,
         ], ';');
     }
 
@@ -780,6 +833,7 @@ function hhmm(int $min): string
 </head>
 
 <body>
+    <?php $expenseColumns = expense_export_columns(); ?>
     <div class="wrap">
         <noprint>
             <a class="btn" href="feestdagen.php">Beheer Feestdagen</a>
@@ -918,45 +972,36 @@ function hhmm(int $min): string
                             <th>Onkosten</th>
                             <th>Weeknummer</th>
                             <th>#</th>
-                            <th class="right">Lunch</th>
-                            <th class="right">Diner</th>
-                            <th class="right">Koffie</th>
-                            <th class="right">Weekend</th>
-                            <th class="right">Scheiding</th>
-                            <th class="right">Buitenland</th>
-                            <th class="right">Nacht</th>
+                            <?php foreach ($expenseColumns as $column): ?>
+                                <th class="right"><?= htmlspecialchars((string) ($column['label'] ?? '')) ?></th>
+                            <?php endforeach; ?>
                         </tr>
                     </thead>
                     <tbody>
                         <?php
                         $j = 0;
-                        $totLunchW = 0;
-                        $totDinnerW = 0;
-                        $totCoffeeW = 0;
-                        $totWeekendW = 0;
-                        $totScheidingW = 0;
-                        $totBuitenlandW = 0;
-                        $totNachtW = 0;
+                        $expenseTotalsWeekTable = [];
+                        foreach ($expenseColumns as $column) {
+                            $expenseKey = (string) ($column['key'] ?? '');
+                            if ($expenseKey !== '') {
+                                $expenseTotalsWeekTable[$expenseKey] = 0;
+                            }
+                        }
                         ?>
                         <?php foreach ($person['weeks'] as $w): ?>
                             <?php
                             $j++;
                             $weekExpenses = (array) ($w['expenses'] ?? []);
-                            $valLunch = max(0, (int) ($weekExpenses['lunch'] ?? 0));
-                            $valDinner = max(0, (int) ($weekExpenses['dinner'] ?? 0));
-                            $valCoffee = max(0, (int) ($weekExpenses['coffee'] ?? 0));
-                            $valWeekend = max(0, (int) ($weekExpenses['weekend'] ?? 0));
-                            $valScheiding = max(0, (int) ($weekExpenses['separation_lt_eu'] ?? 0));
-                            $valBuitenland = max(0, (int) ($weekExpenses['separation_gt_eu'] ?? 0));
-                            $valNacht = max(0, (int) ($weekExpenses['night'] ?? 0));
-
-                            $totLunchW += $valLunch;
-                            $totDinnerW += $valDinner;
-                            $totCoffeeW += $valCoffee;
-                            $totWeekendW += $valWeekend;
-                            $totScheidingW += $valScheiding;
-                            $totBuitenlandW += $valBuitenland;
-                            $totNachtW += $valNacht;
+                            $weekExpenseValues = [];
+                            foreach ($expenseColumns as $column) {
+                                $expenseKey = (string) ($column['key'] ?? '');
+                                if ($expenseKey === '') {
+                                    continue;
+                                }
+                                $value = max(0, (int) ($weekExpenses[$expenseKey] ?? 0));
+                                $weekExpenseValues[$expenseKey] = $value;
+                                $expenseTotalsWeekTable[$expenseKey] += $value;
+                            }
 
                             $weekEditExpensesUrl = "onkosten_editor.php?resourceNo=" . rawurlencode($person['personNo'])
                                 . "&from=" . rawurlencode($from)
@@ -974,26 +1019,26 @@ function hhmm(int $min): string
                                 <td><?= (int) $w['weekNo'] ?> <span
                                         class="muted">(<?= formatDate(htmlspecialchars($w['weekStart'])) ?>)</span></td>
                                 <td><?= $j ?></td>
-                                <td class="right <?= $valLunch === 0 ? 'zeroTotal' : '' ?>"><?= $valLunch ?></td>
-                                <td class="right <?= $valDinner === 0 ? 'zeroTotal' : '' ?>"><?= $valDinner ?></td>
-                                <td class="right <?= $valCoffee === 0 ? 'zeroTotal' : '' ?>"><?= $valCoffee ?></td>
-                                <td class="right <?= $valWeekend === 0 ? 'zeroTotal' : '' ?>"><?= $valWeekend ?></td>
-                                <td class="right <?= $valScheiding === 0 ? 'zeroTotal' : '' ?>"><?= $valScheiding ?></td>
-                                <td class="right <?= $valBuitenland === 0 ? 'zeroTotal' : '' ?>"><?= $valBuitenland ?></td>
-                                <td class="right <?= $valNacht === 0 ? 'zeroTotal' : '' ?>"><?= $valNacht ?></td>
+                                <?php foreach ($expenseColumns as $column): ?>
+                                    <?php
+                                    $expenseKey = (string) ($column['key'] ?? '');
+                                    $value = (int) ($weekExpenseValues[$expenseKey] ?? 0);
+                                    ?>
+                                    <td class="right <?= $value === 0 ? 'zeroTotal' : '' ?>"><?= $value ?></td>
+                                <?php endforeach; ?>
                             </tr>
                         <?php endforeach; ?>
                     </tbody>
                     <tfoot>
                         <tr>
                             <td colspan="3">Totalen</td>
-                            <td class="right <?= $totLunchW === 0 ? 'zeroTotal' : '' ?>"><?= $totLunchW ?></td>
-                            <td class="right <?= $totDinnerW === 0 ? 'zeroTotal' : '' ?>"><?= $totDinnerW ?></td>
-                            <td class="right <?= $totCoffeeW === 0 ? 'zeroTotal' : '' ?>"><?= $totCoffeeW ?></td>
-                            <td class="right <?= $totWeekendW === 0 ? 'zeroTotal' : '' ?>"><?= $totWeekendW ?></td>
-                            <td class="right <?= $totScheidingW === 0 ? 'zeroTotal' : '' ?>"><?= $totScheidingW ?></td>
-                            <td class="right <?= $totBuitenlandW === 0 ? 'zeroTotal' : '' ?>"><?= $totBuitenlandW ?></td>
-                            <td class="right <?= $totNachtW === 0 ? 'zeroTotal' : '' ?>"><?= $totNachtW ?></td>
+                            <?php foreach ($expenseColumns as $column): ?>
+                                <?php
+                                $expenseKey = (string) ($column['key'] ?? '');
+                                $total = (int) ($expenseTotalsWeekTable[$expenseKey] ?? 0);
+                                ?>
+                                <td class="right <?= $total === 0 ? 'zeroTotal' : '' ?>"><?= $total ?></td>
+                            <?php endforeach; ?>
                         </tr>
                     </tfoot>
                 </table>

@@ -87,14 +87,14 @@ function csv_decimal_quarters(float $h): string
 function expense_export_columns(): array
 {
     return [
-        ['key' => 'lunch', 'label' => 'Lunch', 'adp' => 'V407'],
-        ['key' => 'dinner', 'label' => 'Diner', 'adp' => 'V408'],
-        ['key' => 'coffee', 'label' => 'Koffie', 'adp' => 'V409'],
-        ['key' => 'weekend', 'label' => 'Weekend', 'adp' => 'V410'],
-        ['key' => 'separation', 'label' => 'Scheiding', 'adp' => 'V11'],
-        ['key' => 'foreign', 'label' => 'Buitenland', 'adp' => 'V412'],
-        ['key' => 'night', 'label' => 'Nacht', 'adp' => 'V419'],
-        ['key' => 'on_call', 'label' => 'Consignatie', 'adp' => 'V??'],
+        ['key' => 'lunch',          'label' => 'Lunch',         'adp' => 'V407'],
+        ['key' => 'dinner',         'label' => 'Diner',         'adp' => 'V408'],
+        ['key' => 'coffee',         'label' => 'Koffie',        'adp' => 'V406'],
+        ['key' => 'weekend',        'label' => 'Weekend',       'adp' => 'V410'],
+        ['key' => 'separation',     'label' => 'Scheiding',     'adp' => 'V11'],
+        ['key' => 'foreign',        'label' => 'Buitenland',    'adp' => 'V412'],
+        ['key' => 'night',          'label' => 'Nacht',         'adp' => 'V419'],
+        ['key' => 'on_call',        'label' => 'Consignatie',   'adp' => 'V409'],
     ];
 }
 

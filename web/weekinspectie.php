@@ -1,4 +1,37 @@
 <?php
+ob_start();
+register_shutdown_function(function () {
+    $error = error_get_last();
+    if (!$error || ($error['type'] ?? 0) !== E_ERROR) {
+        return;
+    }
+
+    $message = (string) ($error['message'] ?? '');
+    $isTimeout = stripos($message, 'Maximum execution time') !== false
+        && stripos($message, '120') !== false
+        && stripos($message, 'second') !== false;
+
+    if (!$isTimeout) {
+        return;
+    }
+
+    while (ob_get_level() > 0) {
+        ob_end_clean();
+    }
+
+    $refreshUrl = htmlspecialchars((string) ($_SERVER['REQUEST_URI'] ?? 'weekinspectie.php'), ENT_QUOTES, 'UTF-8');
+    http_response_code(503);
+    header('Content-Type: text/html; charset=utf-8');
+    header('Retry-After: 5');
+
+    echo '<!doctype html><html lang="nl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">';
+    echo '<meta http-equiv="refresh" content="5;url=' . $refreshUrl . '">';
+    echo '<title>Even geduld</title></head><body style="font-family:Verdana,Geneva,Tahoma,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0">';
+    echo '<div style="text-align:center;padding:24px">Er is meer tijd nodig om gegevens te laden.<br>De pagina wordt automatisch vernieuwd...</div>';
+    echo '<script>setTimeout(function(){location.reload();},5000);</script>';
+    echo '</body></html>';
+});
+
 require __DIR__ . "/odata.php";
 require __DIR__ . "/auth.php";
 require __DIR__ . "/lib_times.php";
@@ -296,6 +329,12 @@ function dayIsHoliday($i)
     </svg>
     <div class="wrap">
         <noprint>
+            <?= injectTimerHtml([
+                'statusUrl' => 'odata.php?action=cache_status',
+                'title' => 'Cachebestanden',
+                'label' => 'Cache',
+            ]) ?>
+
             <a class="btn" href="<?= htmlspecialchars($backUrl) ?>">← Terug</a>
         </noprint>
 
@@ -306,298 +345,305 @@ function dayIsHoliday($i)
                 <?= htmlspecialchars((string) formatDate($ts['Starting_Date'] ?? '')) ?> –
                 <?= htmlspecialchars((string) formatDate($ts['Ending_Date'] ?? '')) ?><br>
 
-            </div>
+                </di v>
 
-            <table>
-                <thead>
-                    <tr class="date-header-row">
-                        <th colspan="6" class="muted">Resource: <b>
-                                <?= htmlspecialchars($resourceNo) ?>
-                            </b></th>
-                        <?php for ($i = 1; $i <= 7; $i++):
-                            $d = $i - 1;
-                            $cellDate = date('Y-m-d', strtotime($ts['Starting_Date'] . " + {$d} days"));
-                            ?>
-                            <th class="date-header"><?= htmlspecialchars(formatDateDayOnly($cellDate)) ?></th>
-                        <?php endfor; ?>
-                        <th></th>
-                    </tr>
-                    <tr>
-                        <th>Line</th>
-                        <th>Work type</th>
-                        <th>Omschrijving</th>
-                        <th>Project</th>
-                        <th>Task</th>
-                        <th>Status</th>
-                        <th>Ma</th>
-                        <th>Di</th>
-                        <th>Wo</th>
-                        <th>Do</th>
-                        <th>Vr</th>
-                        <th>Za</th>
-                        <th>Zo</th>
-                        <th>Totaal</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <?php foreach ($lines as $l): ?>
-                        <tr>
-                            <td>
-                                <?= $l['Time_Sheet_No'] . "-" . ((int) ($l['Line_No'] ?? 0)) ?>
-                            </td>
-                            <td>
-                                <?= htmlspecialchars((string) ($l['Work_Type_Code'] ?? '')) ?>
-                            </td>
-                            <td>
-                                <?= htmlspecialchars((string) ($l['Description'] ?? '')) ?>
-                            </td>
-                            <td>
-                                <?= htmlspecialchars((string) ($l['Job_No'] ?? '')) ?>
-                            </td>
-                            <td>
-                                <?= htmlspecialchars((string) ($l['Job_Task_No'] ?? '')) ?>
-                            </td>
-                            <td class="<?php
-                            $status = (string) ($l['Status'] ?? '');
-                            if ($status === "Open")
-                                echo "openStatus";
-                            elseif ($status === "Submitted")
-                                echo "submittedStatus";
-                            elseif ($status === "Rejected")
-                                echo "rejectedStatus";
-                            elseif ($status === "Approved")
-                                echo "approvedStatus";
-                            ?>">
-                                <?= htmlspecialchars($status) ?>
-                            </td>
+                <table>
+                    <thead>
+                        <tr class="date-header-row">
+                            <th colspan="6" class="muted">Resource: <b>
+                                    <?= htmlspecialchars($resourceNo) ?>
+                                </b></th>
                             <?php for ($i = 1; $i <= 7; $i++):
                                 $d = $i - 1;
                                 $cellDate = date('Y-m-d', strtotime($ts['Starting_Date'] . " + {$d} days"));
                                 ?>
-                                <td class="<?= dayIsHoliday($i) ? "holiday" : "" ?> <?= hhmm($l["Field{$i}"] ?? '0') == "0:00" ? "zeroHours" : "" ?>"
-                                    data-task="<?= htmlspecialchars((string) ($l['Job_Task_No'] ?? '')) ?>"
-                                    data-worktype="<?= htmlspecialchars((string) ($l['Work_Type_Code'] ?? '')) ?>"
-                                    data-date="<?= $cellDate ?>" data-hours="<?= round((float) ($l["Field{$i}"] ?? 0), 2) ?>">
-
-                                    <?= $l['Work_Type_Code'] == "KM" ?
-                                        htmlspecialchars((string) ($l["Field{$i}"] ?? '0')) . " km"
-                                        : htmlspecialchars((string) hhmm($l["Field{$i}"] ?? '0')) ?>
-                                </td>
+                                <th class="date-header"><?= htmlspecialchars(formatDateDayOnly($cellDate)) ?></th>
                             <?php endfor; ?>
-                            <td>
-                                <b>
-                                    <?= $l['Work_Type_Code'] == "KM" ?
-                                        htmlspecialchars((string) ($l["Total_Quantity"] ?? '0')) . " km"
-                                        : htmlspecialchars((string) hhmm($l["Total_Quantity"] ?? '0')) ?>
-                                </b>
-                            </td>
+                            <th></th>
                         </tr>
-                    <?php endforeach; ?>
-                </tbody>
-            </table>
-        </div>
-        <?php if (!empty(array_filter($webfleetLines))): ?>
-            <div class="card" style="margin-top:12px;">
-                <h2 style="margin:0 0 12px;">Webfleet Uren</h2>
-                <table>
-                    <thead>
                         <tr>
-                            <th>Werkorder</th>
-                            <th>Datum</th>
-                            <th>Work Type</th>
-                            <th>Starttijd</th>
-                            <th>Eindtijd</th>
-                            <th>Pauze</th>
+                            <th>Line</th>
+                            <th>Work type</th>
+                            <th>Omschrijving</th>
+                            <th>Project</th>
+                            <th>Task</th>
+                            <th>Status</th>
+                            <th>Ma</th>
+                            <th>Di</th>
+                            <th>Wo</th>
+                            <th>Do</th>
+                            <th>Vr</th>
+                            <th>Za</th>
+                            <th>Zo</th>
+                            <th>Totaal</th>
                         </tr>
                     </thead>
                     <tbody>
-                        <?php foreach ($webfleetLines as $wf): ?>
-                            <?php if ($wf): ?>
-                                <tr class="webfleet-row" data-task="<?= htmlspecialchars((string) ($wf['Job_Task_No'] ?? '')) ?>"
-                                    data-worktype="<?= htmlspecialchars((string) ($wf['Work_Type_Code'] ?? '')) ?>"
-                                    data-date="<?= htmlspecialchars((string) ($wf['KVT_Date_Webfleet_Activity'] ?? '')) ?>"
-                                    data-hours="<?= ($wf['Work_Type_Code'] ?? '') == 'KM' ? round((float) ($wf['Quantity'] ?? 0), 2) : round((float) ($wf['KVT_Calculated_Hours'] ?? 0), 2) ?>">
-                                    <td>
-                                        <?= htmlspecialchars((string) ($wf['Job_Task_No'] ?? '')) ?>
-                                    </td>
-                                    <td>
-                                        <?= htmlspecialchars(formatDate((string) ($wf['KVT_Date_Webfleet_Activity'] ?? ''))) ?>
-                                    </td>
-                                    <td>
-                                        <?= htmlspecialchars((string) ($wf['Work_Type_Code'] ?? '')) ?>
-                                    </td>
-                                    <td>
-                                        <?php
-                                        $isKM = ($wf['Work_Type_Code'] ?? '') == 'KM';
-                                        $startTime = (string) ($wf['KVT_Start_time_Webfleet_Act'] ?? '');
-                                        echo ($isKM && $startTime === '00:00:00') ? '' : htmlspecialchars($startTime);
-                                        ?>
-                                    </td>
-                                    <td>
-                                        <?php
-                                        $endTime = (string) ($wf['KVT_End_time_Webfleet_Act'] ?? '');
-                                        echo ($isKM && $endTime === '00:00:00') ? '' : htmlspecialchars($endTime);
-                                        ?>
-                                    </td>
-                                    <td>
-                                        <?php
-                                        $pause = (float) ($wf['KVT_Pause'] ?? 0);
-                                        echo ($isKM && $pause == 0) ? '' : htmlspecialchars((string) hhmm($pause));
-                                        ?>
-                                    </td>
-                                </tr>
-                            <?php endif; ?>
-                        <?php endforeach; ?>
-                    </tbody>
-                </table>
-            </div>
-        <?php endif; ?>
 
-        <?php if ($hasWeekExpenses): ?>
-            <div class="card" style="margin-top:12px;">
-                <h2 style="margin:0 0 12px;">Onkosten</h2>
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Onkostensoort</th>
-                            <th>Waarde</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <?php foreach ($weekExpensesPositive as $key => $value): ?>
+                        <?php foreach ($lines as $l): ?>
                             <tr>
-                                <td><?= htmlspecialchars($expensesTypes[$key]) ?></td>
-                                <td><?= (int) $value ?></td>
+                                <td>
+                                    <?= $l['Time_Sheet_No'] . "-" . ((int) ($l['Line_No'] ?? 0)) ?>
+                                </td>
+                                <td>
+                                    <?= htmlspecialchars((string) ($l['Work_Type_Code'] ?? '')) ?>
+                                </td>
+                                <td>
+                                    <?= htmlspecialchars((string) ($l['Description'] ?? '')) ?>
+                                </td>
+                                <td>
+                                    <?= htmlspecialchars((string) ($l['Job_No'] ?? '')) ?>
+                                </td>
+                                <td>
+                                    <?= htmlspecialchars((string) ($l['Job_Task_No'] ?? '')) ?>
+                                </td>
+                                <td class="<?php
+                                $status = (string) ($l['Status'] ?? '');
+                                if ($status === "Open")
+                                    echo "openStatus";
+                                elseif ($status === "Submitted")
+                                    echo "submittedStatus";
+                                elseif ($status === "Rejected")
+                                    echo "rejectedStatus";
+                                elseif ($status === "Approved")
+                                    echo "approvedStatus";
+                                ?>">
+                                    <?= htmlspecialchars($status) ?>
+                                </td>
+                                <?php for ($i = 1; $i <= 7; $i++):
+                                    $d = $i - 1;
+                                    $cellDate = date('Y-m-d', strtotime($ts['Starting_Date'] . " + {$d} days"));
+                                    ?>
+                                    <td class="<?= dayIsHoliday($i) ? "holiday" : "" ?> <?= hhmm($l["Field{$i}"] ?? '0') == "0:00" ? "zeroHours" : "" ?>"
+                                        data-task="<?= htmlspecialchars((string) ($l['Job_Task_No'] ?? '')) ?>"
+                                        data-worktype="<?= htmlspecialchars((string) ($l['Work_Type_Code'] ?? '')) ?>"
+                                        data-date="<?= $cellDate ?>"
+                                        data-hours="<?= round((float) ($l["Field{$i}"] ?? 0), 2) ?>">
+
+                                        <?= $l['Work_Type_Code'] == "KM" ?
+                                            htmlspecialchars((string) ($l["Field{$i}"] ?? '0')) . " km"
+                                            : htmlspecialchars((string) hhmm($l["Field{$i}"] ?? '0')) ?>
+                                    </td>
+                                <?php endfor; ?>
+                                <td>
+                                    <b>
+                                        <?= $l['Work_Type_Code'] == "KM" ?
+                                            htmlspecialchars((string) ($l["Total_Quantity"] ?? '0')) . " km"
+                                            : htmlspecialchars((string) hhmm($l["Total_Quantity"] ?? '0')) ?>
+                                    </b>
+                                </td>
                             </tr>
                         <?php endforeach; ?>
                     </tbody>
                 </table>
-                <noprint style="margin-top:12px; display:block;">
-                    <a class="btn" href="<?= htmlspecialchars($expensesEditorUrl) ?>">Onkosten bewerken</a>
-                </noprint>
             </div>
-        <?php endif; ?>
-    </div>
-    <script>
-        const connectionLine = document.getElementById('connection-line');
+            <?php if (!empty(array_filter($webfleetLines))): ?>
+                <div class="card" style="margin-top:12px;">
+                    <h2 style="margin:0 0 12px;">Webfleet Uren</h2>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Werkorder</th>
+                                <th>Datum</th>
+                                <th>Work Type</th>
+                                <th>Starttijd</th>
+                                <th>Eindtijd</th>
+                                <th>Pauze</th>
+                            </tr>
+                        </thead>
+                        <tbody>
 
-        function drawLine (elem1, elem2)
-        {
-            const rect1 = elem1.getBoundingClientRect();
-            const rect2 = elem2.getBoundingClientRect();
+                            <?php foreach ($webfleetLines as $wf): ?>
+                                <?php if ($wf): ?>
+                                    <tr class="webfleet-row"
+                                        data-task="<?= htmlspecialchars((string) ($wf['Job_Task_No'] ?? '')) ?>"
+                                        data-worktype="<?= htmlspecialchars((string) ($wf['Work_Type_Code'] ?? '')) ?>"
+                                        data-date="<?= htmlspecialchars((string) ($wf['KVT_Date_Webfleet_Activity'] ?? '')) ?>"
+                                        data-hours="<?= ($wf['Work_Type_Code'] ?? '') == 'KM' ? round((float) ($wf['Quantity'] ?? 0), 2) : round((float) ($wf['KVT_Calculated_Hours'] ?? 0), 2) ?>">
+                                        <td>
+                                            <?= htmlspecialchars((string) ($wf['Job_Task_No'] ?? '')) ?>
+                                        </td>
+                                        <td>
+                                            <?= htmlspecialchars(formatDate((string) ($wf['KVT_Date_Webfleet_Activity'] ?? ''))) ?>
+                                        </td>
+                                        <td>
+                                            <?= htmlspecialchars((string) ($wf['Work_Type_Code'] ?? '')) ?>
+                                        </td>
+                                        <td>
+                                            <?php
+                                            $isKM = ($wf['Work_Type_Code'] ?? '') == 'KM';
+                                            $startTime = (string) ($wf['KVT_Start_time_Webfleet_Act'] ?? '');
+                                            echo ($isKM && $startTime === '00:00:00') ? '' : htmlspecialchars($startTime);
+                                            ?>
+                                        </td>
+                                        <td>
+                                            <?php
+                                            $endTime = (string) ($wf['KVT_End_time_Webfleet_Act'] ?? '');
+                                            echo ($isKM && $endTime === '00:00:00') ? '' : htmlspecialchars($endTime);
+                                            ?>
+                                        </td>
+                                        <td>
+                                            <?php
+                                            $pause = (float) ($wf['KVT_Pause'] ?? 0);
+                                            echo ($isKM && $pause == 0) ? '' : htmlspecialchars((string) hhmm($pause));
+                                            ?>
+                                        </td>
+                                    </tr>
+                                <?php endif; ?>
+                            <?php endforeach; ?>
+                        </tbody>
+                    </table>
+                </div>
+            <?php endif; ?>
 
-            // Start from right edge of element1, vertically centered (3px before)
-            const x1 = rect1.right - 3;
-            const y1 = rect1.top + rect1.height / 2;
+            <?php if ($hasWeekExpenses): ?>
+                <div class="card" style="margin-top:12px;">
+                    <h2 style="margin:0 0 12px;">Onkosten</h2>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Onkostensoort</th>
+                                <th>Waarde</th>
+                            </tr>
+                        </thead>
+                        <tbody>
 
-            // End at right edge of element2, vertically centered (3px before)
-            const x2 = rect2.right - 3;
-            const y2 = rect2.top + rect2.height / 2;
+                            <?php foreach ($weekExpensesPositive as $key => $value): ?>
+                                <tr>
+                                    <td><?= htmlspecialchars($expensesTypes[$key]) ?></td>
+                                    <td><?= (int) $value ?></td>
+                                </tr>
+                            <?php endforeach; ?>
+                        </tbody>
+                    </table>
+                    <noprint style="margin-top:12px; display:block;">
+                        <a class="btn" href="<?= htmlspecialchars($expensesEditorUrl) ?>">Onkosten bewerken</a>
+                    </noprint>
+                    </di v>
+                <?php endif; ?>
+            </div>
+            <script>
+                const connectionLine = document.getElementById('connection-line');
 
-            // Control point to the right of both elements
-            const cx = Math.max(rect1.right, rect2.right) + 300;
-            const cy = (y1 + y2) / 2;
-
-            const pathData = `M ${x1} ${y1} Q ${cx} ${cy} ${x2} ${y2}`;
-            connectionLine.setAttribute('d', pathData);
-            connectionLine.style.display = 'block';
-        }
-
-        function hideLine ()
-        {
-            connectionLine.style.display = 'none';
-        }
-
-        // Webfleet row hover -> highlight matching cells
-        document.querySelectorAll('.webfleet-row').forEach(row =>
-        {
-            row.addEventListener('mouseenter', function ()
-            {
-                const task = this.dataset.task;
-                const worktype = this.dataset.worktype;
-                const date = this.dataset.date;
-                let matchedCell = null;
-
-                document.querySelectorAll('td[data-task][data-worktype][data-date]').forEach(cell =>
+                function drawLine (elem1, elem2)
                 {
-                    const cellHours = parseFloat(cell.dataset.hours) || 0;
-                    const rowHours = parseFloat(this.dataset.hours) || 0;
-                    const tolerance = 0.5;
-                    if (cell.dataset.task === task &&
-                        cell.dataset.worktype === worktype &&
-                        cell.dataset.date === date &&
-                        Math.abs(cellHours - rowHours) <= tolerance)
-                    {
-                        cell.classList.add('highlight-cell');
-                        if (!matchedCell) matchedCell = cell;
-                    }
-                });
+                    const rect1 = elem1.getBoundingClientRect();
+                    const rect2 = elem2.getBoundingClientRect();
 
-                if (matchedCell)
-                {
-                    drawLine(matchedCell, this);
+                    // Start from right edge of element1, vertically centered (3px before)
+                    const x1 = rect1.right - 3;
+                    const y1 = rect1.top + rect1.height / 2;
+
+                    // End at right edge of element2, vertically centered (3px before)
+                    const x2 = rect2.right - 3;
+                    const y2 = rect2.top + rect2.height / 2;
+
+                    // Control point to the right of both elements
+                    const cx = Math.max(rect1.right, rect2.right) + 300;
+                    const cy = (y1 + y2) / 2;
+
+                    const pathData = `M ${x1} ${y1} Q ${cx} ${cy} ${x2} ${y2}`;
+                    connectionLine.setAttribute('d', pathData);
+                    connectionLine.style.display = 'block';
                 }
-            });
-
-            row.addEventListener('mouseleave', function ()
-            {
-                document.querySelectorAll('.highlight-cell').forEach(cell =>
+     
+             func tion hideLine()
                 {
-                    cell.classList.remove('highlight-cell');
-                });
-                hideLine();
-            });
-        });
+                    connectionLine.style.display = 'none';
+                }
 
-        // Cell hover -> highlight matching webfleet rows and the cell itself
-        document.querySelectorAll('td[data-task][data-worktype][data-date]').forEach(cell =>
-        {
-            cell.addEventListener('mouseenter', function ()
-            {
-                const task = this.dataset.task;
-                const worktype = this.dataset.worktype;
-                const date = this.dataset.date;
-                let matchFound = false;
-                let matchedRow = null;
-
+                // W   ebfleet row hover -> highlight matching cells
                 document.querySelectorAll('.webfleet-row').forEach(row =>
                 {
-                    const rowHours = parseFloat(row.dataset.hours) || 0;
-                    const cellHours = parseFloat(this.dataset.hours) || 0;
-                    const tolerance = 0.5;
-                    if (row.dataset.task === task &&
-                        row.dataset.worktype === worktype &&
-                        row.dataset.date === date &&
-                        Math.abs(rowHours - cellHours) <= tolerance)
+                    row.addEventListener('mouseenter', function ()
                     {
-                        row.classList.add('highlight-row');
-                        matchFound = true;
-                        if (!matchedRow) matchedRow = row;
-                    }
+                        const task = this.dataset.task;
+                        const worktype = this.dataset.worktype;
+                        const date = this.dataset.date;
+                        let matchedCell = null;
+
+                        document.querySelectorAll('td[data-task][data-worktype][data-date]').forEach(cell =>
+                        {
+                            const cellHours = parseFloat(cell.dataset.hours) || 0;
+                            const rowHours = parseFloat(this.dataset.hours) || 0;
+                            const tolerance = 0.5;
+                            if (cell.dataset.task === task &&
+                                cell.dataset.worktype === worktype &&
+                                cell.dataset.date === date &&
+                                Math.abs(cellHours - rowHours) <= tolerance)
+                            {
+                                cell.classList.add('highlight-cell');
+                                if (!matchedCell) matchedCell = cell;
+                            }
+                        });
+
+                        if (matchedCell)
+                        {
+                            drawLine(matchedCell, this);
+                        }
+                    });
+
+
+                    row.addEventListener('mouseleave', function ()
+                    {
+                        document.querySelectorAll('.highlight-cell').forEach(cell =>
+                        {
+                            cell.classList.remove('highlight-cell');
+                        });
+                        hideLine();
+                    });
                 });
 
-                // Highlight the cell itself if a match was found
-                if (matchFound)
+                // C   ell hover -> highlight matching webfleet rows and the cell itself
+                document.querySelectorAll('td[data-task][data-worktype][data-date]').forEach(cell =>
                 {
-                    this.classList.add('highlight-cell');
-                    if (matchedRow)
+                    cell.addEventListener('mouseenter', function ()
                     {
-                        drawLine(this, matchedRow);
-                    }
-                }
-            });
+                        const task = this.dataset.task;
+                        const worktype = this.dataset.worktype;
+                        const date = this.dataset.date;
+                        let matchFound = false;
+                        let matchedRow = null;
 
-            cell.addEventListener('mouseleave', function ()
-            {
-                document.querySelectorAll('.highlight-row').forEach(row =>
-                {
-                    row.classList.remove('highlight-row');
+                        document.querySelectorAll('.webfleet-row').forEach(row =>
+                        {
+                            const rowHours = parseFloat(row.dataset.hours) || 0;
+                            const cellHours = parseFloat(this.dataset.hours) || 0;
+                            const tolerance = 0.5;
+                            if (row.dataset.task === task &&
+                                row.dataset.worktype === worktype &&
+                                row.dataset.date === date &&
+                                Math.abs(rowHours - cellHours) <= tolerance)
+                            {
+                                row.classList.add('highlight-row');
+                                matchFound = true;
+                                if (!matchedRow) matchedRow = row;
+                            }
+                        });
+
+                        // H  ighlight the cell itself if a match was found
+                        if (matchFound)
+                        {
+                            this.classList.add('highlight-cell');
+                            if (matchedRow)
+                            {
+                                drawLine(this, matchedRow);
+                            }
+                        }
+                    });
+
+                    cell.addEventListener('mouseleave', function ()
+                    {
+                        document.querySelectorAll('.highlight-row').forEach(row =>
+                        {
+                            row.classList.remove('highlight-row');
+                        });
+                        this.classList.remove('highlight-cell');
+                hide    Line();
+                    });
+
                 });
-                this.classList.remove('highlight-cell');
-                hideLine();
-            });
-        });
-    </script>
+            </script>
 </body>
 
 </html>

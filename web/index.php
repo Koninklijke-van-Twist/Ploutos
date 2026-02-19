@@ -271,6 +271,11 @@ if ((string) ($_GET['action'] ?? '') === 'months') {
 </head>
 
 <body>
+    <?= injectTimerHtml([
+        'statusUrl' => 'odata.php?action=cache_status',
+        'title' => 'Cachebestanden',
+        'label' => 'Cache',
+    ]) ?>
     <div id="pageLoader" class="page-loader" aria-live="polite" aria-busy="true">
         <div class="page-loader-box">Bezig met laden…</div>
     </div>

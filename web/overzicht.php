@@ -87,14 +87,14 @@ function csv_decimal_quarters(float $h): string
 function expense_export_columns(): array
 {
     return [
-        ['key' => 'lunch',          'label' => 'Lunch',         'adp' => 'V407'],
-        ['key' => 'dinner',         'label' => 'Diner',         'adp' => 'V408'],
-        ['key' => 'coffee',         'label' => 'Koffie',        'adp' => 'V406'],
-        ['key' => 'weekend',        'label' => 'Weekend',       'adp' => 'V410'],
-        ['key' => 'separation',     'label' => 'Scheiding',     'adp' => 'V11'],
-        ['key' => 'foreign',        'label' => 'Buitenland',    'adp' => 'V412'],
-        ['key' => 'night',          'label' => 'Nacht',         'adp' => 'V419'],
-        ['key' => 'on_call',        'label' => 'Consignatie',   'adp' => 'V409'],
+        ['key' => 'lunch', 'label' => 'Lunch', 'adp' => 'V407'],
+        ['key' => 'dinner', 'label' => 'Diner', 'adp' => 'V408'],
+        ['key' => 'coffee', 'label' => 'Koffie', 'adp' => 'V406'],
+        ['key' => 'weekend', 'label' => 'Weekend', 'adp' => 'V410'],
+        ['key' => 'separation', 'label' => 'Scheiding', 'adp' => 'V11'],
+        ['key' => 'foreign', 'label' => 'Buitenland', 'adp' => 'V412'],
+        ['key' => 'night', 'label' => 'Nacht', 'adp' => 'V419'],
+        ['key' => 'on_call', 'label' => 'Consignatie', 'adp' => 'V409'],
     ];
 }
 
@@ -269,9 +269,6 @@ foreach ($lines as $l) {
     if ($tsNo === '' || !isset($tsByNo[$tsNo]))
         continue;
 
-    if ($l['Status'] !== "Approved")
-        continue;
-
     $personNo = (string) ($l['Header_Resource_No'] ?? '');
     if ($personNo === '')
         continue;
@@ -283,7 +280,7 @@ foreach ($lines as $l) {
         continue;
 
     $weekStart = (string) ($tsByNo[$tsNo]['Starting_Date'] ?? '');
-    if (!$weekStart)
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $weekStart))
         continue;
 
     // Init struct
@@ -307,12 +304,22 @@ foreach ($lines as $l) {
             'onkosten' => 0.0,
             'verlet' => 0.0,
             'expenses' => $expenseDefaults,
-            'lines' => 0
+            'lines' => 0,
+            'dayHours' => [0, 0, 0, 0, 0, 0, 0],
+            'hasUnapproved' => false,
+            'unapprovedCount' => 0,
         ];
     }
 
+    $isApproved = ((string) ($l['Status'] ?? '') === 'Approved');
+    if (!$isApproved) {
+        $byPerson[$personNo]['weeks'][$tsNo]['hasUnapproved'] = true;
+        $byPerson[$personNo]['weeks'][$tsNo]['unapprovedCount']++;
+        continue;
+    }
+
     // Uren per dag (Field1..7)
-    $dayHours = $byPerson[$personNo]['weeks'][$tsNo]['dayHours'] ?? [];
+    $dayHours = $byPerson[$personNo]['weeks'][$tsNo]['dayHours'];
 
     $workType = (string) ($l['Work_Type_Code'] ?? '');
 
@@ -352,6 +359,9 @@ foreach ($byPerson as $pKey => $person) {
     foreach ($lines as $l) {
         $linePersonNo = (string) ($l['Header_Resource_No'] ?? '');
         $lineTsNo = (string) ($l['Time_Sheet_No'] ?? '');
+        if ((string) ($l['Status'] ?? '') !== 'Approved') {
+            continue;
+        }
         if ($linePersonNo === $person['personNo'] && in_array($lineTsNo, $allTsNos)) {
             $jobTaskNo = (string) ($l['Job_Task_No'] ?? '');
             if ($jobTaskNo !== '') {
@@ -633,6 +643,13 @@ function hhmm(int $min): string
             text-decoration: none;
             color: #0f172a;
             background: #fff
+        }
+
+        .warn-indicator {
+            margin-left: 6px;
+            cursor: help;
+            font-size: 14px;
+            vertical-align: middle;
         }
 
         .right {
@@ -977,6 +994,11 @@ function hhmm(int $min): string
                                     <a class="btn js-nav-loading" href="<?= htmlspecialchars($inspectUrl) ?>">
                                         <noprint>Bekijk <?= $w['lines'] ?></noprint>&nbsp;
                                     </a>
+                                    <?php if (!empty($w['hasUnapproved'])): ?>
+                                        <span class="warn-indicator"
+                                            title="Deze week bevat niet-goedgekeurde regels.&#10;Deze regels worden niet meegeteld in het overzicht.">⚠️
+                                            <noprint><?= (int) ($w['unapprovedCount'] ?? 0) ?></span></noprint>
+                                    <?php endif; ?>
                                 </td>
                                 <td><?= (int) $w['weekNo'] ?> <span
                                         class="muted">(<?= formatDate(htmlspecialchars($w['weekStart'])) ?>)</span></td>

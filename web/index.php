@@ -85,17 +85,26 @@ function get_valid_months(array $auth, string $base, int $day): array
         $tsNos[] = $no;
     }
 
-    $lines = odata_fetch_by_or_filter_safe($base, 'Urenstaatregels', 'Time_Sheet_No,Status', 'Time_Sheet_No', $tsNos, $auth, 3600);
+    $lines = odata_fetch_by_or_filter_safe($base, 'Urenstaatregels', 'Time_Sheet_No,Header_Resource_No', 'Time_Sheet_No', $tsNos, $auth, 3600);
     $validTsNos = [];
     foreach ($lines as $line) {
-        if ((string) ($line['Status'] ?? '') !== 'Approved') {
+        $lineTsNo = (string) ($line['Time_Sheet_No'] ?? '');
+        if ($lineTsNo === '' || !isset($timesheetsByNo[$lineTsNo])) {
             continue;
         }
 
-        $lineTsNo = (string) ($line['Time_Sheet_No'] ?? '');
-        if ($lineTsNo !== '') {
-            $validTsNos[$lineTsNo] = true;
+        $resourceNo = (string) ($line['Header_Resource_No'] ?? '');
+        if ($resourceNo === '') {
+            continue;
         }
+
+        $sd = (string) ($timesheetsByNo[$lineTsNo]['Starting_Date'] ?? '');
+        $ed = (string) ($timesheetsByNo[$lineTsNo]['Ending_Date'] ?? '');
+        if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $sd) || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $ed)) {
+            continue;
+        }
+
+        $validTsNos[$lineTsNo] = true;
     }
 
     $months = [];

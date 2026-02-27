@@ -997,7 +997,8 @@ function hhmm(int $min): string
                                     <?php if (!empty($w['hasUnapproved'])): ?>
                                         <span class="warn-indicator"
                                             title="Deze week bevat niet-goedgekeurde regels.&#10;Deze regels worden niet meegeteld in het overzicht.">⚠️
-                                            <noprint><?= (int) ($w['unapprovedCount'] ?? 0) ?></span></noprint>
+                                            <noprint><?= (int) ($w['unapprovedCount'] ?? 0) ?>
+                                        </span></noprint>
                                     <?php endif; ?>
                                 </td>
                                 <td><?= (int) $w['weekNo'] ?> <span

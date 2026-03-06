@@ -653,6 +653,12 @@ function hhmm(int $min): string
             color: #64748b
         }
 
+        .person-approver {
+            margin: -6px 0 10px;
+            font-size: 12px;
+            color: #7b8797;
+        }
+
         .zeroTotal {
 
             color: #c7d1e0
@@ -986,6 +992,10 @@ function hhmm(int $min): string
         <?php foreach ($byPerson as $person): ?>
             <div class="card">
                 <h2><?= htmlspecialchars($person['name']) ?></h2>
+                <?php if ((string) ($person['timesheetApproverUserId'] ?? '') !== ''): ?>
+                    <div class="person-approver">
+                        &nbsp;<?= htmlspecialchars((string) $person['timesheetApproverUserId']) ?></div>
+                <?php endif; ?>
                 <noprint>
                     <button class="btn"
                         onclick="openPrintModal(event, <?= htmlspecialchars(json_encode($person), ENT_QUOTES) ?>)">Toon

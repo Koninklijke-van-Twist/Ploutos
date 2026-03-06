@@ -43,6 +43,7 @@ $resourceNo = trim((string) ($_GET['resourceNo'] ?? ''));
 $from = trim((string) ($_GET['from'] ?? ''));
 $to = trim((string) ($_GET['to'] ?? ''));
 $month = trim((string) ($_GET['month'] ?? ''));
+$selectedApproverUserId = trim((string) ($_GET['approverUserId'] ?? ''));
 if ($tsNo === '' || $resourceNo === '')
     die("tsNo/resourceNo ontbreekt");
 
@@ -93,18 +94,21 @@ if (isset($expensesByTs[$tsNo])) {
     }
 }
 $hasWeekExpenses = !empty($weekExpensesPositive);
+$backFrom = $from !== '' ? $from : (string) $startDate;
+$backTo = $to !== '' ? $to : (string) $endDate;
+
 $expensesEditorUrl = 'onkosten_editor.php?resourceNo=' . rawurlencode($resourceNo)
-    . '&from=' . rawurlencode((string) $startDate)
-    . '&to=' . rawurlencode((string) $endDate)
+    . '&from=' . rawurlencode($backFrom)
+    . '&to=' . rawurlencode($backTo)
     . ($month !== '' ? '&month=' . rawurlencode($month) : '')
+    . ($selectedApproverUserId !== '' ? '&approverUserId=' . rawurlencode($selectedApproverUserId) : '')
     . '&returnPage=weekinspectie'
     . '&returnTsNo=' . rawurlencode($tsNo);
 
-$backFrom = $from !== '' ? $from : (string) $startDate;
-$backTo = $to !== '' ? $to : (string) $endDate;
-$backUrl = $month !== ''
-    ? 'overzicht.php?month=' . rawurlencode($month)
-    : 'overzicht.php?from=' . rawurlencode($backFrom) . '&to=' . rawurlencode($backTo);
+$backUrl = 'overzicht.php?from=' . rawurlencode($backFrom)
+    . '&to=' . rawurlencode($backTo)
+    . ($month !== '' ? '&month=' . rawurlencode($month) : '')
+    . ($selectedApproverUserId !== '' ? '&approverUserId=' . rawurlencode($selectedApproverUserId) : '');
 
 foreach ($allProjects as $project) {
     $wfFilter = rawurlencode("Job_Task_No eq '" . str_replace("'", "''", $project) . "'");

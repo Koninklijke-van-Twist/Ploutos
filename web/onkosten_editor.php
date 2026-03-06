@@ -8,6 +8,7 @@ $resourceNo = trim((string) ($_GET['resourceNo'] ?? $_POST['resourceNo'] ?? ''))
 $from = trim((string) ($_GET['from'] ?? $_POST['from'] ?? ''));
 $to = trim((string) ($_GET['to'] ?? $_POST['to'] ?? ''));
 $month = trim((string) ($_GET['month'] ?? $_POST['month'] ?? ''));
+$selectedApproverUserId = trim((string) ($_GET['approverUserId'] ?? $_POST['approverUserId'] ?? ''));
 $returnPage = trim((string) ($_GET['returnPage'] ?? $_POST['returnPage'] ?? 'overzicht'));
 $returnTsNo = trim((string) ($_GET['returnTsNo'] ?? $_POST['returnTsNo'] ?? ''));
 
@@ -74,6 +75,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         . '&from=' . rawurlencode($from)
         . '&to=' . rawurlencode($to)
         . ($month !== '' ? '&month=' . rawurlencode($month) : '')
+        . ($selectedApproverUserId !== '' ? '&approverUserId=' . rawurlencode($selectedApproverUserId) : '')
         . '&returnPage=' . rawurlencode($returnPage)
         . '&returnTsNo=' . rawurlencode($returnTsNo)
         . '&saved=1';
@@ -88,12 +90,14 @@ if ($returnPage === 'weekinspectie' && $returnTsNo !== '') {
         . '&resourceNo=' . rawurlencode($resourceNo)
         . ($month !== '' ? '&month=' . rawurlencode($month) : '')
         . '&from=' . rawurlencode($from)
-        . '&to=' . rawurlencode($to);
+        . '&to=' . rawurlencode($to)
+        . ($selectedApproverUserId !== '' ? '&approverUserId=' . rawurlencode($selectedApproverUserId) : '');
     $backLabel = 'Terug naar weekinspectie';
 } else {
-    $backUrl = $month !== ''
-        ? 'overzicht.php?month=' . rawurlencode($month)
-        : 'overzicht.php?from=' . rawurlencode($from) . '&to=' . rawurlencode($to);
+    $backUrl = 'overzicht.php?from=' . rawurlencode($from)
+        . '&to=' . rawurlencode($to)
+        . ($month !== '' ? '&month=' . rawurlencode($month) : '')
+        . ($selectedApproverUserId !== '' ? '&approverUserId=' . rawurlencode($selectedApproverUserId) : '');
     $backLabel = 'Terug naar overzicht';
 }
 $typeKeys = array_keys($types);
@@ -260,6 +264,7 @@ $rightTypeKeys = array_slice($typeKeys, $splitAt);
                     <input type="hidden" name="from" value="<?= htmlspecialchars($from) ?>">
                     <input type="hidden" name="to" value="<?= htmlspecialchars($to) ?>">
                     <input type="hidden" name="month" value="<?= htmlspecialchars($month) ?>">
+                    <input type="hidden" name="approverUserId" value="<?= htmlspecialchars($selectedApproverUserId) ?>">
                     <input type="hidden" name="returnPage" value="<?= htmlspecialchars($returnPage) ?>">
                     <input type="hidden" name="returnTsNo" value="<?= htmlspecialchars($returnTsNo) ?>">
 

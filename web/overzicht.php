@@ -44,6 +44,7 @@ $day = $hour * 24;
 $month = trim((string) ($_GET['month'] ?? ''));
 $from = trim((string) ($_GET['from'] ?? ''));
 $to = trim((string) ($_GET['to'] ?? ''));
+$selectedApproverUserId = trim((string) ($_GET['approverUserId'] ?? ''));
 $expenseDefaults = expenses_defaults();
 
 // Bepaal range
@@ -257,10 +258,23 @@ $needResNos = array_keys($needRes);
 // Resource lookup (naam, etc.)
 $resourcesByNo = [];
 if ($needResNos) {
-    foreach (odata_fetch_by_or_filter($base, 'AppResources', 'No,Name', 'No', $needResNos, $auth, $day) as $r) {
+    foreach (odata_fetch_by_or_filter($base, 'AppResource', 'No,Name,Time_Sheet_Approver_User_ID', 'No', $needResNos, $auth, $day) as $r) {
         $resourcesByNo[(string) $r['No']] = $r;
     }
 }
+
+$approverUserIdOptions = [];
+foreach ($resourcesByNo as $resource) {
+    $approverUserId = trim((string) ($resource['Time_Sheet_Approver_User_ID'] ?? ''));
+    if ($approverUserId !== '') {
+        $approverUserIdOptions[$approverUserId] = true;
+    }
+}
+if ($selectedApproverUserId !== '') {
+    $approverUserIdOptions[$selectedApproverUserId] = true;
+}
+$approverUserIds = array_keys($approverUserIdOptions);
+sort($approverUserIds, SORT_NATURAL | SORT_FLAG_CASE);
 
 // Aggregatie: personNo + timesheetNo (week)
 $byPerson = []; // personNo => ['name'=>..., 'weeks'=>[tsNo=>row]]
@@ -287,6 +301,8 @@ foreach ($lines as $l) {
     if (!isset($byPerson[$personNo])) {
         $byPerson[$personNo] = ['personNo' => $personNo, 'name' => $name, 'weeks' => [], 'webfleet' => []];
     }
+
+    $byPerson[$personNo]['timesheetApproverUserId'] = trim((string) ($resourcesByNo[$personNo]['Time_Sheet_Approver_User_ID'] ?? ''));
 
     if (!isset($byPerson[$personNo]['weeks'][$tsNo])) {
         // weeknummer uit Description (fallback)
@@ -434,6 +450,13 @@ foreach ($byPerson as $personNo => &$person) {
     unset($week);
 }
 unset($person);
+
+if ($selectedApproverUserId !== '') {
+    $byPerson = array_filter(
+        $byPerson,
+        fn($person) => (string) ($person['timesheetApproverUserId'] ?? '') === $selectedApproverUserId
+    );
+}
 
 // Sortering: personen op naam, weken per persoon op weeknummer desc
 usort($byPerson, fn($a, $b) => strcmp($a['name'], $b['name']));
@@ -919,13 +942,41 @@ function hhmm(int $min): string
             <a class="btn" href="feestdagen.php">Beheer Feestdagen</a>
             <?php
             $exportUrl = 'overzicht.php?export=csv';
+            if ($from !== '') {
+                $exportUrl .= '&from=' . rawurlencode($from);
+            }
+            if ($to !== '') {
+                $exportUrl .= '&to=' . rawurlencode($to);
+            }
             if ($month !== '') {
                 $exportUrl .= '&month=' . rawurlencode($month);
-            } else {
-                $exportUrl .= '&from=' . rawurlencode($from) . '&to=' . rawurlencode($to);
+            }
+            if ($selectedApproverUserId !== '') {
+                $exportUrl .= '&approverUserId=' . rawurlencode($selectedApproverUserId);
             }
             ?>
             <a class="btn" href="<?= htmlspecialchars($exportUrl) ?>">Export totalen als CSV</a>
+            <form id="approverFilterForm" method="get" style="display:inline-block; margin-left:8px;">
+                <?php if ($from !== ''): ?>
+                    <input type="hidden" name="from" value="<?= htmlspecialchars($from) ?>">
+                <?php endif; ?>
+                <?php if ($to !== ''): ?>
+                    <input type="hidden" name="to" value="<?= htmlspecialchars($to) ?>">
+                <?php endif; ?>
+                <?php if ($month !== ''): ?>
+                    <input type="hidden" name="month" value="<?= htmlspecialchars($month) ?>">
+                <?php endif; ?>
+                <label for="approverUserId" class="muted" style="margin-left:6px;">Approver:</label>
+                <select id="approverUserId" name="approverUserId" class="btn" style="padding-right:26px;">
+                    <option value="">alle</option>
+                    <?php foreach ($approverUserIds as $approverUserId): ?>
+                        <option value="<?= htmlspecialchars($approverUserId) ?>"
+                            <?= $selectedApproverUserId === $approverUserId ? 'selected' : '' ?>>
+                            <?= htmlspecialchars($approverUserId) ?>
+                        </option>
+                    <?php endforeach; ?>
+                </select>
+            </form>
         </noprint>
         <h1>Overzicht <?= formatDate(htmlspecialchars($from)) ?> t/m <?= formatDate(htmlspecialchars($to)) ?></h1>
         <noprint>
@@ -944,6 +995,7 @@ function hhmm(int $min): string
                         . "&from=" . rawurlencode($from)
                         . "&to=" . rawurlencode($to)
                         . ($month !== '' ? "&month=" . rawurlencode($month) : '')
+                        . ($selectedApproverUserId !== '' ? "&approverUserId=" . rawurlencode($selectedApproverUserId) : '')
                         . "&returnPage=overzicht";
                     ?>
                     <a href="<?= htmlspecialchars($expensesEditorUrl) ?>"><button class="btn">Onkosten Invoeren</button></a>
@@ -985,9 +1037,10 @@ function hhmm(int $min): string
 
                             $inspectUrl = "weekinspectie.php?tsNo=" . rawurlencode($w['tsNo'])
                                 . "&resourceNo=" . rawurlencode($person['personNo'])
-                                . ($month !== ''
-                                    ? "&month=" . rawurlencode($month)
-                                    : "&from=" . rawurlencode($from) . "&to=" . rawurlencode($to));
+                                . "&from=" . rawurlencode($from)
+                                . "&to=" . rawurlencode($to)
+                                . ($month !== '' ? "&month=" . rawurlencode($month) : '')
+                                . ($selectedApproverUserId !== '' ? "&approverUserId=" . rawurlencode($selectedApproverUserId) : '');
                             ?>
                             <tr>
                                 <td>
@@ -1093,6 +1146,7 @@ function hhmm(int $min): string
                                 . "&from=" . rawurlencode($from)
                                 . "&to=" . rawurlencode($to)
                                 . ($month !== '' ? "&month=" . rawurlencode($month) : '')
+                                . ($selectedApproverUserId !== '' ? "&approverUserId=" . rawurlencode($selectedApproverUserId) : '')
                                 . "&returnPage=overzicht"
                                 . "&returnTsNo=" . rawurlencode((string) ($w['tsNo'] ?? ''));
                             ?>
@@ -1178,6 +1232,17 @@ function hhmm(int $min): string
         {
             hidePageLoader();
         });
+
+        const approverSelect = document.getElementById('approverUserId');
+        const approverForm = document.getElementById('approverFilterForm');
+        if (approverSelect && approverForm)
+        {
+            approverSelect.addEventListener('change', function ()
+            {
+                showPageLoader();
+                approverForm.submit();
+            });
+        }
 
         function round_to_quarters (h)
         {

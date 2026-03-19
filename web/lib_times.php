@@ -101,3 +101,67 @@ function split_premiums_for_day(float $hours, string $dateYmd): array
 
   return ['p285' => $p285, 'p47' => $p47, 'p85' => 0];
 }
+
+/**
+ * Detecteert potentieel onjuist ingevulde uren op basis van regels:
+ * - >24 uur geschreven op een dag
+ * - Ma-Vr meer dan 2 uur op SOT125
+ * - Op zondag uren op SOT125 of SOT150
+ *
+ * Verwacht regels met keys: Work_Type_Code, Field1..Field7 en optioneel Status.
+ */
+function detect_hour_entry_issues(array $lines, bool $approvedOnly = false): array
+{
+  $dayTotals = array_fill(0, 7, 0.0);
+  $sot125ByDay = array_fill(0, 7, 0.0);
+  $sot150ByDay = array_fill(0, 7, 0.0);
+
+  foreach ($lines as $line) {
+    if ($approvedOnly && (string) ($line['Status'] ?? '') !== 'Approved') {
+      continue;
+    }
+
+    $workType = (string) ($line['Work_Type_Code'] ?? '');
+    for ($i = 1; $i <= 7; $i++) {
+      $hours = (float) ($line["Field{$i}"] ?? 0);
+      $dayIndex = $i - 1;
+
+      if ($workType !== 'KM') {
+        $dayTotals[$dayIndex] += $hours;
+      }
+      if ($workType === 'SOT125') {
+        $sot125ByDay[$dayIndex] += $hours;
+      } elseif ($workType === 'SOT150') {
+        $sot150ByDay[$dayIndex] += $hours;
+      }
+    }
+  }
+
+  $over24Days = array_fill(0, 7, false);
+  $weekdaySot125Over2Days = array_fill(0, 7, false);
+  $sundaySotDays = array_fill(0, 7, false);
+  $hasIssues = false;
+
+  for ($d = 0; $d < 7; $d++) {
+    $over24Days[$d] = $dayTotals[$d] > 24.0;
+    if ($d <= 4) {
+      $weekdaySot125Over2Days[$d] = $sot125ByDay[$d] > 2.0;
+    }
+    if ($d === 6) {
+      $sundaySotDays[$d] = $sot125ByDay[$d] > 0.0 || $sot150ByDay[$d] > 0.0;
+    }
+    if ($over24Days[$d] || $weekdaySot125Over2Days[$d] || $sundaySotDays[$d]) {
+      $hasIssues = true;
+    }
+  }
+
+  return [
+    'dayTotals' => $dayTotals,
+    'sot125ByDay' => $sot125ByDay,
+    'sot150ByDay' => $sot150ByDay,
+    'over24Days' => $over24Days,
+    'weekdaySot125Over2Days' => $weekdaySot125Over2Days,
+    'sundaySotDays' => $sundaySotDays,
+    'hasIssues' => $hasIssues,
+  ];
+}

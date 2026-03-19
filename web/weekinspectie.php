@@ -44,6 +44,7 @@ $from = trim((string) ($_GET['from'] ?? ''));
 $to = trim((string) ($_GET['to'] ?? ''));
 $month = trim((string) ($_GET['month'] ?? ''));
 $selectedApproverUserId = trim((string) ($_GET['approverUserId'] ?? ''));
+$returnPerson = trim((string) ($_GET['returnPerson'] ?? ''));
 if ($tsNo === '' || $resourceNo === '')
     die("tsNo/resourceNo ontbreekt");
 
@@ -72,6 +73,14 @@ $linesAll = odata_get_all($url, $auth, 300);
 $lines = array_values(array_filter($linesAll, function ($l) use ($resourceNo) {
     return (string) ($l['Header_Resource_No'] ?? '') === $resourceNo;
 }));
+
+$hourIssueData = detect_hour_entry_issues($lines);
+$weekHasHourIssues = (bool) ($hourIssueData['hasIssues'] ?? false);
+$dayTotals = (array) ($hourIssueData['dayTotals'] ?? array_fill(0, 7, 0.0));
+$over24Days = (array) ($hourIssueData['over24Days'] ?? array_fill(0, 7, false));
+$weekdaySot125Over2Days = (array) ($hourIssueData['weekdaySot125Over2Days'] ?? array_fill(0, 7, false));
+$sundaySotDays = (array) ($hourIssueData['sundaySotDays'] ?? array_fill(0, 7, false));
+$weekTotalHours = array_sum($dayTotals);
 
 $year = substr($ts['Starting_Date'], 0, 4);
 
@@ -102,13 +111,15 @@ $expensesEditorUrl = 'onkosten_editor.php?resourceNo=' . rawurlencode($resourceN
     . '&to=' . rawurlencode($backTo)
     . ($month !== '' ? '&month=' . rawurlencode($month) : '')
     . ($selectedApproverUserId !== '' ? '&approverUserId=' . rawurlencode($selectedApproverUserId) : '')
+    . ($returnPerson !== '' ? '&returnPerson=' . rawurlencode($returnPerson) : '')
     . '&returnPage=weekinspectie'
     . '&returnTsNo=' . rawurlencode($tsNo);
 
 $backUrl = 'overzicht.php?from=' . rawurlencode($backFrom)
     . '&to=' . rawurlencode($backTo)
     . ($month !== '' ? '&month=' . rawurlencode($month) : '')
-    . ($selectedApproverUserId !== '' ? '&approverUserId=' . rawurlencode($selectedApproverUserId) : '');
+    . ($selectedApproverUserId !== '' ? '&approverUserId=' . rawurlencode($selectedApproverUserId) : '')
+    . ($returnPerson !== '' ? '&returnPerson=' . rawurlencode($returnPerson) : '');
 
 foreach ($allProjects as $project) {
     $wfFilter = rawurlencode("Job_Task_No eq '" . str_replace("'", "''", $project) . "'");
@@ -309,6 +320,34 @@ function dayIsHoliday($i)
             color: #700;
         }
 
+        .hour-issue-summary {
+            margin: 8px 0 10px;
+            padding: 8px 10px;
+            border: 1px solid #fca5a5;
+            background: #fee2e2;
+            color: #7f1d1d;
+            border-radius: 10px;
+            font-weight: 700;
+        }
+
+        .hour-issue-blink {
+            color: #b91c1c;
+            font-weight: 700;
+            animation: issue-red-blink 0.9s step-end infinite;
+        }
+
+        @keyframes issue-red-blink {
+
+            0%,
+            100% {
+                opacity: 1;
+            }
+
+            50% {
+                opacity: 0.2;
+            }
+        }
+
         #connection-overlay {
             position: fixed;
             top: 0;
@@ -323,7 +362,6 @@ function dayIsHoliday($i)
     <link rel="icon" type="image/png" sizes="32x32" href="favicon-32x32.png">
     <link rel="icon" type="image/png" sizes="16x16" href="favicon-16x16.png">
     <link rel="manifest" href="site.webmanifest">
-    </body>
 </head>
 
 <body>
@@ -348,8 +386,10 @@ function dayIsHoliday($i)
                 <?= htmlspecialchars((string) ($ts['Description'] ?? '')) ?> ·
                 <?= htmlspecialchars((string) formatDate($ts['Starting_Date'] ?? '')) ?> –
                 <?= htmlspecialchars((string) formatDate($ts['Ending_Date'] ?? '')) ?><br>
-
-                </di v>
+            </div>
+            <?php if ($weekHasHourIssues): ?>
+                <div class="hour-issue-summary">Onjuist ingevulde uren gedetecteerd!</div>
+            <?php endif; ?>
 
                 <table>
                     <thead>
@@ -417,6 +457,18 @@ function dayIsHoliday($i)
                                 <?php for ($i = 1; $i <= 7; $i++):
                                     $d = $i - 1;
                                     $cellDate = date('Y-m-d', strtotime($ts['Starting_Date'] . " + {$d} days"));
+                                    $cellHours = (float) ($l["Field{$i}"] ?? 0);
+                                    $workTypeCode = (string) ($l['Work_Type_Code'] ?? '');
+                                    $cellHasHourIssue = false;
+                                    if (($over24Days[$d] ?? false) && $workTypeCode !== 'KM' && $cellHours > 0) {
+                                        $cellHasHourIssue = true;
+                                    }
+                                    if (($weekdaySot125Over2Days[$d] ?? false) && $workTypeCode === 'SOT125' && $cellHours > 0) {
+                                        $cellHasHourIssue = true;
+                                    }
+                                    if (($sundaySotDays[$d] ?? false) && ($workTypeCode === 'SOT125' || $workTypeCode === 'SOT150') && $cellHours > 0) {
+                                        $cellHasHourIssue = true;
+                                    }
                                     ?>
                                     <td class="<?= dayIsHoliday($i) ? "holiday" : "" ?> <?= hhmm($l["Field{$i}"] ?? '0') == "0:00" ? "zeroHours" : "" ?>"
                                         data-task="<?= htmlspecialchars((string) ($l['Job_Task_No'] ?? '')) ?>"
@@ -424,9 +476,16 @@ function dayIsHoliday($i)
                                         data-date="<?= $cellDate ?>"
                                         data-hours="<?= round((float) ($l["Field{$i}"] ?? 0), 2) ?>">
 
-                                        <?= $l['Work_Type_Code'] == "KM" ?
-                                            htmlspecialchars((string) ($l["Field{$i}"] ?? '0')) . " km"
-                                            : htmlspecialchars((string) hhmm($l["Field{$i}"] ?? '0')) ?>
+                                        <?php
+                                        $cellValueHtml = $workTypeCode === "KM"
+                                            ? htmlspecialchars((string) ($l["Field{$i}"] ?? '0')) . " km"
+                                            : htmlspecialchars((string) hhmm($l["Field{$i}"] ?? '0'));
+                                        if ($cellHasHourIssue) {
+                                            echo '<span class="hour-issue-blink">' . $cellValueHtml . '</span>';
+                                        } else {
+                                            echo $cellValueHtml;
+                                        }
+                                        ?>
                                     </td>
                                 <?php endfor; ?>
                                 <td>
@@ -439,6 +498,25 @@ function dayIsHoliday($i)
                             </tr>
                         <?php endforeach; ?>
                     </tbody>
+                    <tfoot>
+                        <tr>
+                            <td colspan="6"><b>Totaal per dag</b></td>
+                            <?php for ($d = 0; $d < 7; $d++): ?>
+                                <?php
+                                $dayTotalHours = (float) ($dayTotals[$d] ?? 0);
+                                $dayHasIssue = (bool) (($over24Days[$d] ?? false) || ($weekdaySot125Over2Days[$d] ?? false) || ($sundaySotDays[$d] ?? false));
+                                ?>
+                                <td class="<?= $dayTotalHours <= 0 ? 'zeroHours' : '' ?>">
+                                    <?php if ($dayHasIssue): ?>
+                                        <span class="hour-issue-blink"><?= htmlspecialchars(hhmm($dayTotalHours)) ?></span>
+                                    <?php else: ?>
+                                        <?= htmlspecialchars(hhmm($dayTotalHours)) ?>
+                                    <?php endif; ?>
+                                </td>
+                            <?php endfor; ?>
+                            <td><b><?= htmlspecialchars(hhmm($weekTotalHours)) ?></b></td>
+                        </tr>
+                    </tfoot>
                 </table>
             </div>
             <?php if (!empty(array_filter($webfleetLines))): ?>
@@ -523,7 +601,7 @@ function dayIsHoliday($i)
                     <noprint style="margin-top:12px; display:block;">
                         <a class="btn" href="<?= htmlspecialchars($expensesEditorUrl) ?>">Onkosten bewerken</a>
                     </noprint>
-                    </di v>
+                </div>
                 <?php endif; ?>
             </div>
             <script>
@@ -551,7 +629,7 @@ function dayIsHoliday($i)
                     connectionLine.style.display = 'block';
                 }
      
-             func tion hideLine()
+                function hideLine ()
                 {
                     connectionLine.style.display = 'none';
                 }
@@ -643,7 +721,7 @@ function dayIsHoliday($i)
                             row.classList.remove('highlight-row');
                         });
                         this.classList.remove('highlight-cell');
-                hide    Line();
+                        hideLine();
                     });
 
                 });

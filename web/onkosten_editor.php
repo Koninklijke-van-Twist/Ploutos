@@ -9,6 +9,7 @@ $from = trim((string) ($_GET['from'] ?? $_POST['from'] ?? ''));
 $to = trim((string) ($_GET['to'] ?? $_POST['to'] ?? ''));
 $month = trim((string) ($_GET['month'] ?? $_POST['month'] ?? ''));
 $selectedApproverUserId = trim((string) ($_GET['approverUserId'] ?? $_POST['approverUserId'] ?? ''));
+$returnPerson = trim((string) ($_GET['returnPerson'] ?? $_POST['returnPerson'] ?? ''));
 $returnPage = trim((string) ($_GET['returnPage'] ?? $_POST['returnPage'] ?? 'overzicht'));
 $returnTsNo = trim((string) ($_GET['returnTsNo'] ?? $_POST['returnTsNo'] ?? ''));
 
@@ -76,6 +77,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         . '&to=' . rawurlencode($to)
         . ($month !== '' ? '&month=' . rawurlencode($month) : '')
         . ($selectedApproverUserId !== '' ? '&approverUserId=' . rawurlencode($selectedApproverUserId) : '')
+        . ($returnPerson !== '' ? '&returnPerson=' . rawurlencode($returnPerson) : '')
         . '&returnPage=' . rawurlencode($returnPage)
         . '&returnTsNo=' . rawurlencode($returnTsNo)
         . '&saved=1';
@@ -91,13 +93,15 @@ if ($returnPage === 'weekinspectie' && $returnTsNo !== '') {
         . ($month !== '' ? '&month=' . rawurlencode($month) : '')
         . '&from=' . rawurlencode($from)
         . '&to=' . rawurlencode($to)
-        . ($selectedApproverUserId !== '' ? '&approverUserId=' . rawurlencode($selectedApproverUserId) : '');
+        . ($selectedApproverUserId !== '' ? '&approverUserId=' . rawurlencode($selectedApproverUserId) : '')
+        . ($returnPerson !== '' ? '&returnPerson=' . rawurlencode($returnPerson) : '');
     $backLabel = 'Terug naar weekinspectie';
 } else {
     $backUrl = 'overzicht.php?from=' . rawurlencode($from)
         . '&to=' . rawurlencode($to)
         . ($month !== '' ? '&month=' . rawurlencode($month) : '')
-        . ($selectedApproverUserId !== '' ? '&approverUserId=' . rawurlencode($selectedApproverUserId) : '');
+        . ($selectedApproverUserId !== '' ? '&approverUserId=' . rawurlencode($selectedApproverUserId) : '')
+        . ($returnPerson !== '' ? '&returnPerson=' . rawurlencode($returnPerson) : '');
     $backLabel = 'Terug naar overzicht';
 }
 $typeKeys = array_keys($types);
@@ -265,6 +269,7 @@ $rightTypeKeys = array_slice($typeKeys, $splitAt);
                     <input type="hidden" name="to" value="<?= htmlspecialchars($to) ?>">
                     <input type="hidden" name="month" value="<?= htmlspecialchars($month) ?>">
                     <input type="hidden" name="approverUserId" value="<?= htmlspecialchars($selectedApproverUserId) ?>">
+                    <input type="hidden" name="returnPerson" value="<?= htmlspecialchars($returnPerson) ?>">
                     <input type="hidden" name="returnPage" value="<?= htmlspecialchars($returnPage) ?>">
                     <input type="hidden" name="returnTsNo" value="<?= htmlspecialchars($returnTsNo) ?>">
 

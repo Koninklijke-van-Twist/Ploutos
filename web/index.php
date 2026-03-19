@@ -309,12 +309,12 @@ if ((string) ($_GET['action'] ?? '') === 'months') {
 
             <div class="row">
                 <div>
-                    <label>Periode van (YYYY-MM-DD)</label>
-                    <input name="from" placeholder="2026-01-01">
+                    <label>Periode van</label>
+                    <input type="date" name="from" placeholder="2026-01-01">
                 </div>
                 <div>
-                    <label>t/m (YYYY-MM-DD)</label>
-                    <input name="to" placeholder="2026-01-31">
+                    <label>t/m</label>
+                    <input type="date" name="to" placeholder="2026-01-31">
                 </div>
             </div>
 

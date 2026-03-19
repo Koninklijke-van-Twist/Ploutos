@@ -45,6 +45,7 @@ $month = trim((string) ($_GET['month'] ?? ''));
 $from = trim((string) ($_GET['from'] ?? ''));
 $to = trim((string) ($_GET['to'] ?? ''));
 $selectedApproverUserId = trim((string) ($_GET['approverUserId'] ?? ''));
+$returnPerson = trim((string) ($_GET['returnPerson'] ?? ''));
 $expenseDefaults = expenses_defaults();
 
 // Bepaal range
@@ -324,6 +325,8 @@ foreach ($lines as $l) {
             'dayHours' => [0, 0, 0, 0, 0, 0, 0],
             'hasUnapproved' => false,
             'unapprovedCount' => 0,
+            'validationLines' => [],
+            'hasHourIssues' => false,
         ];
     }
 
@@ -336,6 +339,7 @@ foreach ($lines as $l) {
 
     // Uren per dag (Field1..7)
     $dayHours = $byPerson[$personNo]['weeks'][$tsNo]['dayHours'];
+    $byPerson[$personNo]['weeks'][$tsNo]['validationLines'][] = $l;
 
     $workType = (string) ($l['Work_Type_Code'] ?? '');
 
@@ -429,6 +433,12 @@ foreach ($byPerson as $pKey => $person) {
             $byPerson[$pKey]['weeks'][$tsKey]['p47'] += $split['p47'];
             $byPerson[$pKey]['weeks'][$tsKey]['p85'] += $split['p85'];
         }
+
+        $hourIssueData = detect_hour_entry_issues((array) ($byPerson[$pKey]['weeks'][$tsKey]['validationLines'] ?? []));
+        $byPerson[$pKey]['weeks'][$tsKey]['hasHourIssues'] = (bool) ($hourIssueData['hasIssues'] ?? false);
+        $byPerson[$pKey]['weeks'][$tsKey]['hourIssueData'] = $hourIssueData;
+        unset($byPerson[$pKey]['weeks'][$tsKey]['validationLines']);
+
         $byPerson[$pKey]['weeks'][$tsKey]["weekTotaal"] = $weekTotal;
     }
 }
@@ -679,6 +689,14 @@ function hhmm(int $min): string
             cursor: help;
             font-size: 14px;
             vertical-align: middle;
+        }
+
+        .hour-issue-indicator {
+            display: inline-block;
+            min-width: 1.2em;
+            text-align: center;
+            color: #b91c1c;
+            font-weight: 700;
         }
 
         .right {
@@ -990,7 +1008,8 @@ function hhmm(int $min): string
         </noprint>
 
         <?php foreach ($byPerson as $person): ?>
-            <div class="card">
+            <?php $personAnchorId = 'person-' . rawurlencode((string) ($person['personNo'] ?? '')); ?>
+            <div class="card" id="<?= htmlspecialchars($personAnchorId) ?>" data-person-no="<?= htmlspecialchars((string) ($person['personNo'] ?? '')) ?>">
                 <h2><?= htmlspecialchars($person['name']) ?></h2>
                 <?php if ((string) ($person['timesheetApproverUserId'] ?? '') !== ''): ?>
                     <div class="person-approver">
@@ -1006,6 +1025,7 @@ function hhmm(int $min): string
                         . "&to=" . rawurlencode($to)
                         . ($month !== '' ? "&month=" . rawurlencode($month) : '')
                         . ($selectedApproverUserId !== '' ? "&approverUserId=" . rawurlencode($selectedApproverUserId) : '')
+                        . "&returnPerson=" . rawurlencode((string) ($person['personNo'] ?? ''))
                         . "&returnPage=overzicht";
                     ?>
                     <a href="<?= htmlspecialchars($expensesEditorUrl) ?>"><button class="btn">Onkosten Invoeren</button></a>
@@ -1050,7 +1070,8 @@ function hhmm(int $min): string
                                 . "&from=" . rawurlencode($from)
                                 . "&to=" . rawurlencode($to)
                                 . ($month !== '' ? "&month=" . rawurlencode($month) : '')
-                                . ($selectedApproverUserId !== '' ? "&approverUserId=" . rawurlencode($selectedApproverUserId) : '');
+                                . ($selectedApproverUserId !== '' ? "&approverUserId=" . rawurlencode($selectedApproverUserId) : '')
+                                . "&returnPerson=" . rawurlencode((string) ($person['personNo'] ?? ''));
                             ?>
                             <tr>
                                 <td>
@@ -1062,6 +1083,9 @@ function hhmm(int $min): string
                                             title="Deze week bevat niet-goedgekeurde regels.&#10;Deze regels worden niet meegeteld in het overzicht.">⚠️
                                             <noprint><?= (int) ($w['unapprovedCount'] ?? 0) ?>
                                         </span></noprint>
+                                    <?php endif; ?>
+                                    <?php if (!empty($w['hasHourIssues'])): ?>
+                                        <span class="warn-indicator hour-issue-indicator" title="Onjuist ingevulde uren gedetecteerd!" aria-label="Onjuist ingevulde uren gedetecteerd!">‼️</span>
                                     <?php endif; ?>
                                 </td>
                                 <td><?= (int) $w['weekNo'] ?> <span
@@ -1157,6 +1181,7 @@ function hhmm(int $min): string
                                 . "&to=" . rawurlencode($to)
                                 . ($month !== '' ? "&month=" . rawurlencode($month) : '')
                                 . ($selectedApproverUserId !== '' ? "&approverUserId=" . rawurlencode($selectedApproverUserId) : '')
+                                . "&returnPerson=" . rawurlencode((string) ($person['personNo'] ?? ''))
                                 . "&returnPage=overzicht"
                                 . "&returnTsNo=" . rawurlencode((string) ($w['tsNo'] ?? ''));
                             ?>
@@ -1253,6 +1278,55 @@ function hhmm(int $min): string
                 approverForm.submit();
             });
         }
+
+        (function restorePersonScroll ()
+        {
+            const params = new URLSearchParams(window.location.search);
+            const returnPerson = params.get('returnPerson');
+            if (!returnPerson)
+            {
+                return;
+            }
+            const anchorId = `person-${encodeURIComponent(returnPerson)}`;
+            const target = document.getElementById(anchorId);
+            if (!target)
+            {
+                return;
+            }
+            target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        })();
+
+        (function animateHourIssueIndicators ()
+        {
+            const indicators = Array.from(document.querySelectorAll('.hour-issue-indicator'));
+            if (!indicators.length)
+            {
+                return;
+            }
+
+            const cycleMs = 2000;
+            const render = function ()
+            {
+                const t = Date.now() % cycleMs;
+                if (t < 1000)
+                {
+                    indicators.forEach(function (el)
+                    {
+                        el.textContent = '‼️';
+                    });
+                }
+                else
+                {
+                    indicators.forEach(function (el)
+                    {
+                        el.textContent = '⁉️';
+                    });
+                }
+            };
+
+            render();
+            window.setInterval(render, 120);
+        })();
 
         function round_to_quarters (h)
         {

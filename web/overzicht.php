@@ -70,6 +70,41 @@ function formatDate(string $dateStr): string
     return $dt->format('d') . ' ' . $months[$dt->format('n') - 1] . ' ' . $dt->format('Y');
 }
 
+function week_starts_for_range(string $from, string $to): array
+{
+    try {
+        $fromDt = new DateTimeImmutable($from);
+        $toDt = new DateTimeImmutable($to);
+    } catch (Exception $e) {
+        return [];
+    }
+
+    if ($toDt < $fromDt) {
+        return [];
+    }
+
+    $starts = [];
+    $cursor = $fromDt->modify('monday this week');
+    $endWeek = $toDt->modify('monday this week');
+    while ($cursor <= $endWeek) {
+        $starts[] = $cursor->format('Y-m-d');
+        $cursor = $cursor->modify('+7 days');
+    }
+
+    return $starts;
+}
+
+function week_label_for_ymd(string $dateStr): string
+{
+    try {
+        $dt = new DateTimeImmutable($dateStr);
+    } catch (Exception $e) {
+        return $dateStr;
+    }
+
+    return 'W' . $dt->format('W');
+}
+
 function round_to_quarters(float $h): string
 {
     if (!is_numeric($h)) {
@@ -196,6 +231,8 @@ foreach ($tsRows as $t) {
 
 if (!$tsNos)
     die("Geen geldige urenstaten in dit tijdvak.");
+
+$expectedWeekStarts = week_starts_for_range($from, $to);
 
 // Helper OR filter
 function odata_or_filter(string $field, array $values): string
@@ -461,6 +498,30 @@ foreach ($byPerson as $personNo => &$person) {
 }
 unset($person);
 
+foreach ($byPerson as $personNo => &$person) {
+    $presentWeekStarts = [];
+    foreach ($person['weeks'] as $week) {
+        $weekStart = (string) ($week['weekStart'] ?? '');
+        if ($weekStart !== '') {
+            $presentWeekStarts[$weekStart] = true;
+        }
+    }
+
+    $missingWeekStarts = [];
+    $missingWeekLabels = [];
+    foreach ($expectedWeekStarts as $weekStart) {
+        if (!isset($presentWeekStarts[$weekStart])) {
+            $missingWeekStarts[] = $weekStart;
+            $missingWeekLabels[] = week_label_for_ymd($weekStart);
+        }
+    }
+
+    $person['missingWeekStarts'] = $missingWeekStarts;
+    $person['missingWeekLabels'] = $missingWeekLabels;
+    $person['missingWeekCount'] = count($missingWeekStarts);
+}
+unset($person);
+
 if ($selectedApproverUserId !== '') {
     $byPerson = array_filter(
         $byPerson,
@@ -667,6 +728,12 @@ function hhmm(int $min): string
             margin: -6px 0 10px;
             font-size: 12px;
             color: #7b8797;
+        }
+
+        .person-missing-weeks {
+            margin: -6px 0 10px;
+            font-size: 12px;
+            color: #9a3412;
         }
 
         .zeroTotal {
@@ -1009,11 +1076,25 @@ function hhmm(int $min): string
 
         <?php foreach ($byPerson as $person): ?>
             <?php $personAnchorId = 'person-' . rawurlencode((string) ($person['personNo'] ?? '')); ?>
-            <div class="card" id="<?= htmlspecialchars($personAnchorId) ?>" data-person-no="<?= htmlspecialchars((string) ($person['personNo'] ?? '')) ?>">
+            <div class="card" id="<?= htmlspecialchars($personAnchorId) ?>"
+                data-person-no="<?= htmlspecialchars((string) ($person['personNo'] ?? '')) ?>">
                 <h2><?= htmlspecialchars($person['name']) ?></h2>
                 <?php if ((string) ($person['timesheetApproverUserId'] ?? '') !== ''): ?>
                     <div class="person-approver">
                         &nbsp;<?= htmlspecialchars((string) $person['timesheetApproverUserId']) ?></div>
+                <?php endif; ?>
+                <?php if ((int) ($person['missingWeekCount'] ?? 0) > 0): ?>
+                    <?php
+                    $missingLabels = (array) ($person['missingWeekLabels'] ?? []);
+                    $visibleMissingLabels = array_slice($missingLabels, 0, 8);
+                    $hasMoreMissing = count($missingLabels) > count($visibleMissingLabels);
+                    $missingWeekDates = (array) ($person['missingWeekStarts'] ?? []);
+                    ?>
+                    <div class="person-missing-weeks"
+                        title="Ontbrekende weken: <?= htmlspecialchars(implode(', ', $missingWeekDates)) ?>">
+                        Ontbrekende urenstaten:
+                        <?= htmlspecialchars(implode(', ', $visibleMissingLabels)) ?><?= $hasMoreMissing ? ', ...' : '' ?>
+                    </div>
                 <?php endif; ?>
                 <noprint>
                     <button class="btn"
@@ -1085,7 +1166,9 @@ function hhmm(int $min): string
                                         </span></noprint>
                                     <?php endif; ?>
                                     <?php if (!empty($w['hasHourIssues'])): ?>
-                                        <span class="warn-indicator hour-issue-indicator" title="Onjuist ingevulde uren gedetecteerd!" aria-label="Onjuist ingevulde uren gedetecteerd!">‼️</span>
+                                        <span class="warn-indicator hour-issue-indicator"
+                                            title="Onjuist ingevulde uren gedetecteerd!"
+                                            aria-label="Onjuist ingevulde uren gedetecteerd!">‼️</span>
                                     <?php endif; ?>
                                 </td>
                                 <td><?= (int) $w['weekNo'] ?> <span

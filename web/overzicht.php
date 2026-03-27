@@ -1093,7 +1093,7 @@ function hhmm(int $min): string
                     <div class="person-missing-weeks"
                         title="Ontbrekende weken: <?= htmlspecialchars(implode(', ', $missingWeekDates)) ?>">
                         Ontbrekende urenstaten:
-                        <?= htmlspecialchars(implode(', ', $visibleMissingLabels)) ?><?= $hasMoreMissing ? ', ...' : '' ?>
+                        <?= htmlspecialchars(implode(', ', $visibleMissingLabels)) ?>        <?= $hasMoreMissing ? ', ...' : '' ?>
                     </div>
                 <?php endif; ?>
                 <noprint>

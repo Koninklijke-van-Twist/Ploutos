@@ -87,6 +87,7 @@ $year = substr($ts['Starting_Date'], 0, 4);
 $allProjects = array_unique(array_filter(array_column($lines, 'Job_Task_No')));
 
 $webfleetLines = [];
+$webfleetCardNotice = '';
 $startDate = $ts['Starting_Date'];
 $endDate = $ts['Ending_Date'];
 $expensesTypes = expenses_types();
@@ -121,19 +122,84 @@ $backUrl = 'overzicht.php?from=' . rawurlencode($backFrom)
     . ($selectedApproverUserId !== '' ? '&approverUserId=' . rawurlencode($selectedApproverUserId) : '')
     . ($returnPerson !== '' ? '&returnPerson=' . rawurlencode($returnPerson) : '');
 
-foreach ($allProjects as $project) {
-    $wfFilter = rawurlencode("Job_Task_No eq '" . str_replace("'", "''", $project) . "'");
-    $wfUrl = $base . "WebfleetHours?\$select=Job_Task_No,KVT_Date_Webfleet_Activity,KVT_Start_time_Webfleet_Act,Quantity,KVT_End_time_Webfleet_Act,KVT_Pause,Work_Type_Code,KVT_Calculated_Hours&\$filter={$wfFilter}&\$format=json";
-    $wf = (odata_get_all($wfUrl, $auth, 300) ?? null);
-    if ($wf !== null) {
-        // Filter to only include dates within the timesheet week
-        $wfFiltered = array_filter($wf, function ($line) use ($startDate, $endDate) {
-            $activityDate = (string) ($line['KVT_Date_Webfleet_Activity'] ?? '');
-            return $activityDate >= $startDate && $activityDate <= $endDate;
-        });
-        // Merge the filtered results into webfleetLines
-        $webfleetLines = array_merge($webfleetLines, $wfFiltered);
+try {
+    $weekNoFromDescription = 0;
+    $description = (string) ($ts['Description'] ?? '');
+    if (preg_match('/\bWeek\s*(\d+)\b/i', $description, $m)) {
+        $weekNoFromDescription = (int) ($m[1] ?? 0);
     }
+
+    $startDateDt = new DateTimeImmutable((string) $startDate);
+    $isoWeekNo = (int) $startDateDt->format('W');
+    $isoYearNo = (int) $startDateDt->format('o');
+
+    $weekNoCandidates = [];
+    if ($weekNoFromDescription > 0) {
+        $weekNoCandidates[] = $weekNoFromDescription;
+    }
+    if (!in_array($isoWeekNo, $weekNoCandidates, true)) {
+        $weekNoCandidates[] = $isoWeekNo;
+    }
+
+    $cardRows = [];
+    foreach ($weekNoCandidates as $candidateWeekNo) {
+        $cardFilterDecoded = "Resource_No eq '" . str_replace("'", "''", $resourceNo) . "'"
+            . " and Week_No eq " . (int) $candidateWeekNo
+            . " and Year_No eq " . (int) $isoYearNo;
+        $cardFilter = rawurlencode($cardFilterDecoded);
+        $cardUrl = $base . "WebfleetHoursCard?\$select=Resource_No,Resource_Name,Week_No,Year_No,Status&\$filter={$cardFilter}&\$format=json";
+        $cardRows = odata_get_all($cardUrl, $auth, 300) ?? [];
+        if (!empty($cardRows)) {
+            break;
+        }
+    }
+
+    if (empty($cardRows)) {
+        $webfleetCardNotice = 'Webfleet via WebfleetHoursCard levert geen kaart op voor deze resource/week.';
+    } else {
+        $dateFilter = "KVT_Date_Webfleet_Activity ge {$startDate} and KVT_Date_Webfleet_Activity le {$endDate}";
+        $entity = 'WebfleetHoursCardWebfleetHrsLines';
+        $select = 'Job_Task_No,KVT_Date_Webfleet_Activity,KVT_Start_time_Webfleet_Act,Quantity,KVT_End_time_Webfleet_Act,KVT_Pause,Work_Type_Code,KVT_Calculated_Hours';
+        $fetched = [];
+
+        if (!empty($allProjects)) {
+            foreach ($allProjects as $project) {
+                $projectEscaped = str_replace("'", "''", (string) $project);
+                $lineFilter = rawurlencode($dateFilter . " and Job_Task_No eq '" . $projectEscaped . "'");
+                $lineUrl = $base . $entity . "?\$select={$select}&\$filter={$lineFilter}&\$format=json";
+                $rows = odata_get_all($lineUrl, $auth, 300) ?? [];
+                foreach ($rows as $row) {
+                    $fetched[] = $row;
+                }
+            }
+        } else {
+            $lineFilter = rawurlencode($dateFilter);
+            $lineUrl = $base . $entity . "?\$select={$select}&\$filter={$lineFilter}&\$format=json";
+            $rows = odata_get_all($lineUrl, $auth, 300) ?? [];
+            foreach ($rows as $row) {
+                $fetched[] = $row;
+            }
+        }
+
+        $unique = [];
+        foreach ($fetched as $row) {
+            $key = (string) ($row['Job_Task_No'] ?? '')
+                . '|' . (string) ($row['KVT_Date_Webfleet_Activity'] ?? '')
+                . '|' . (string) ($row['KVT_Start_time_Webfleet_Act'] ?? '')
+                . '|' . (string) ($row['KVT_End_time_Webfleet_Act'] ?? '')
+                . '|' . (string) ($row['Work_Type_Code'] ?? '')
+                . '|' . (string) ($row['KVT_Calculated_Hours'] ?? '');
+            $unique[$key] = $row;
+        }
+        $webfleetLines = array_values($unique);
+
+        if (empty($webfleetLines)) {
+            $webfleetCardNotice = 'WebfleetHoursCard gevonden, maar geen bijbehorende regels in WebfleetHoursCardWebfleetHrsLines voor deze week.';
+        }
+    }
+} catch (Throwable $e) {
+    $webfleetLines = [];
+    $webfleetCardNotice = 'Webfleet via WebfleetHoursCard kon niet geladen worden: ' . $e->getMessage();
 }
 
 $holidays = holiday_set($year);
@@ -330,6 +396,16 @@ function dayIsHoliday($i)
             font-weight: 700;
         }
 
+        .webfleet-notice {
+            margin: 10px 0;
+            padding: 8px 10px;
+            border: 1px solid #f59e0b;
+            background: #fffbeb;
+            color: #92400e;
+            border-radius: 10px;
+            font-weight: 700;
+        }
+
         .hour-issue-blink {
             color: #b91c1c;
             font-weight: 700;
@@ -518,6 +594,10 @@ function dayIsHoliday($i)
                 </tfoot>
             </table>
         </div>
+        <?php if ($webfleetCardNotice !== ''): ?>
+            <div class="webfleet-notice"><?= htmlspecialchars($webfleetCardNotice) ?></div>
+        <?php endif; ?>
+
         <?php if (!empty(array_filter($webfleetLines))): ?>
             <div class="card" style="margin-top:12px;">
                 <h2 style="margin:0 0 12px;">Webfleet Uren</h2>

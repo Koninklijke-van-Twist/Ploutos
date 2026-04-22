@@ -158,6 +158,7 @@ try {
         $webfleetCardNotice = 'Webfleet via WebfleetHoursCard levert geen kaart op voor deze resource/week.';
     } else {
         $dateFilter = "KVT_Date_Webfleet_Activity ge {$startDate} and KVT_Date_Webfleet_Activity le {$endDate}";
+        $resourceFilter = "No eq '" . str_replace("'", "''", (string) $resourceNo) . "'";
         $entity = 'WebfleetHoursCardWebfleetHrsLines';
         $select = 'Job_Task_No,KVT_Date_Webfleet_Activity,KVT_Start_time_Webfleet_Act,Quantity,KVT_End_time_Webfleet_Act,KVT_Pause,Work_Type_Code,KVT_Calculated_Hours';
         $fetched = [];
@@ -165,7 +166,7 @@ try {
         if (!empty($allProjects)) {
             foreach ($allProjects as $project) {
                 $projectEscaped = str_replace("'", "''", (string) $project);
-                $lineFilter = rawurlencode($dateFilter . " and Job_Task_No eq '" . $projectEscaped . "'");
+                $lineFilter = rawurlencode($dateFilter . " and " . $resourceFilter . " and Job_Task_No eq '" . $projectEscaped . "'");
                 $lineUrl = $base . $entity . "?\$select={$select}&\$filter={$lineFilter}&\$format=json";
                 $rows = odata_get_all($lineUrl, $auth, 300) ?? [];
                 foreach ($rows as $row) {
@@ -173,7 +174,7 @@ try {
                 }
             }
         } else {
-            $lineFilter = rawurlencode($dateFilter);
+            $lineFilter = rawurlencode($dateFilter . " and " . $resourceFilter);
             $lineUrl = $base . $entity . "?\$select={$select}&\$filter={$lineFilter}&\$format=json";
             $rows = odata_get_all($lineUrl, $auth, 300) ?? [];
             foreach ($rows as $row) {

@@ -5,10 +5,10 @@ function hours_to_minutes(float $h): int
   return (int) round($h * 60);
 }
 
-function minutes_to_hhmm(int $min): string
+function minutes_to_hhmm(float|int $min): string
 {
   $sign = $min < 0 ? "-" : "";
-  $min = abs($min);
+  $min = (int) round(abs($min));
   $h = intdiv($min, 60);
   $m = $min % 60;
   return sprintf("%s%d:%02d", $sign, $h, $m);

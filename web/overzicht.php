@@ -625,7 +625,7 @@ function eur(float $v): string
 {
     return "€ " . number_format($v, 2, ",", ".");
 }
-function hhmm(int $min): string
+function hhmm(float|int $min): string
 {
     return minutes_to_hhmm($min);
 }

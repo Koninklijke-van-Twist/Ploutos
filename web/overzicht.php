@@ -538,6 +538,65 @@ foreach ($byPerson as &$p) {
 }
 unset($p);
 
+// Bouw een gegroepeerd overzicht van personen met missende of onjuiste urenstaten
+$issuesByApprover = [];
+foreach ($byPerson as $person) {
+    $missingWeeks = (array) ($person['missingWeekLabels'] ?? []);
+    $weeksWithProblems = [];
+    foreach ($person['weeks'] as $w) {
+        $problems = [];
+        if (!empty($w['hasUnapproved'])) {
+            $cnt = (int) ($w['unapprovedCount'] ?? 0);
+            $problems[] = $cnt . ' niet-goedgekeurde regel' . ($cnt === 1 ? '' : 's');
+        }
+        if (!empty($w['hasHourIssues'])) {
+            $dayNames = ['Ma', 'Di', 'Wo', 'Do', 'Vr', 'Za', 'Zo'];
+            $iData = (array) ($w['hourIssueData'] ?? []);
+            $dayIssueDescs = [];
+            for ($d = 0; $d < 7; $d++) {
+                $parts = [];
+                if (!empty($iData['over24Days'][$d])) {
+                    $parts[] = 'meer dan 24u';
+                }
+                if (!empty($iData['weekdaySot125Over2Days'][$d])) {
+                    $parts[] = '28.5%-toeslag > 2u';
+                }
+                if (!empty($iData['sundaySotDays'][$d])) {
+                    $parts[] = 'SOT op zondag';
+                }
+                if ($parts) {
+                    $dayIssueDescs[] = $dayNames[$d] . ': ' . implode(', ', $parts);
+                }
+            }
+            $problems[] = 'Onjuiste uren' . ($dayIssueDescs ? ' (' . implode('; ', $dayIssueDescs) . ')' : '');
+        }
+        if ($problems) {
+            $weeksWithProblems[] = [
+                'weekNo'    => (int) ($w['weekNo'] ?? 0),
+                'weekStart' => (string) ($w['weekStart'] ?? ''),
+                'problems'  => $problems,
+            ];
+        }
+    }
+
+    if (!$missingWeeks && !$weeksWithProblems) {
+        continue;
+    }
+
+    $approver = (string) ($person['timesheetApproverUserId'] ?? '');
+    $approverKey = $approver !== '' ? $approver : '(geen goedkeurder)';
+    if (!isset($issuesByApprover[$approverKey])) {
+        $issuesByApprover[$approverKey] = [];
+    }
+    $issuesByApprover[$approverKey][] = [
+        'name'               => (string) ($person['name'] ?? ''),
+        'missingWeeks'       => $missingWeeks,
+        'weeksWithProblems'  => $weeksWithProblems,
+    ];
+}
+ksort($issuesByApprover, SORT_NATURAL | SORT_FLAG_CASE);
+$totalIssuePersons = array_sum(array_map('count', $issuesByApprover));
+
 if ((string) ($_GET['export'] ?? '') === 'csv') {
     $filenameSuffix = $month !== '' ? $month : ($from . '_' . $to);
     $filenameSuffix = preg_replace('/[^0-9A-Za-z_-]/', '_', (string) $filenameSuffix);
@@ -1023,6 +1082,15 @@ function hhmm(float|int $min): string
 <body>
     <?php $expenseColumns = expense_export_columns(); ?>
     <div class="wrap">
+        <?php if ($totalIssuePersons > 0): ?>
+        <noprint>
+            <button class="btn btn-issues-alert"
+                onclick="document.getElementById('issuesModal').classList.add('active')"
+                style="background:#fef2f2;border-color:#fca5a5;color:#991b1b;font-weight:700;margin-bottom:8px;">
+                ⚠️ Missende / onjuiste urenstaten (<?= $totalIssuePersons ?>)
+            </button>
+        </noprint>
+        <?php endif; ?>
         <noprint>
             <?= injectTimerHtml([
                 'statusUrl' => 'odata.php?action=cache_status',
@@ -1671,6 +1739,58 @@ function hhmm(float|int $min): string
                 .replace(/'/g, '&#039;');
         }
     </script>
+
+    <?php if ($totalIssuePersons > 0): ?>
+    <noprint>
+        <div id="issuesModal" class="print-modal" role="dialog" aria-modal="true"
+             aria-label="Missende of onjuiste urenstaten">
+            <div class="print-modal-content">
+                <button class="print-close-btn"
+                    onclick="document.getElementById('issuesModal').classList.remove('active')">Sluiten</button>
+                <h2 style="margin-top:0;margin-bottom:16px;">Missende / onjuiste urenstaten</h2>
+                <?php foreach ($issuesByApprover as $approverKey => $persons): ?>
+                    <h3 style="color:#1e3a5f;margin:20px 0 6px;font-size:14px;border-bottom:2px solid #cbd5e1;padding-bottom:4px;">
+                        <?= htmlspecialchars($approverKey) ?>
+                    </h3>
+                    <table style="width:100%;border-collapse:collapse;margin-bottom:8px;">
+                        <thead>
+                            <tr>
+                                <th style="text-align:left;padding:6px 10px;background:#f1f5f9;border-bottom:2px solid #cbd5e1;font-size:13px;width:220px;">Medewerker</th>
+                                <th style="text-align:left;padding:6px 10px;background:#f1f5f9;border-bottom:2px solid #cbd5e1;font-size:13px;">Probleem</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <?php foreach ($persons as $p): ?>
+                                <?php if ($p['missingWeeks']): ?>
+                                    <tr>
+                                        <td style="padding:5px 10px;border-bottom:1px solid #e2e8f0;vertical-align:top;font-size:13px;">
+                                            <?= htmlspecialchars($p['name']) ?>
+                                        </td>
+                                        <td style="padding:5px 10px;border-bottom:1px solid #e2e8f0;font-size:13px;color:#9a3412;">
+                                            Ontbrekende urenstaten: <?= htmlspecialchars(implode(', ', $p['missingWeeks'])) ?>
+                                        </td>
+                                    </tr>
+                                <?php endif; ?>
+                                <?php foreach ($p['weeksWithProblems'] as $wp): ?>
+                                    <tr>
+                                        <td style="padding:5px 10px;border-bottom:1px solid #e2e8f0;vertical-align:top;font-size:13px;">
+                                            <?= htmlspecialchars($p['name']) ?>
+                                        </td>
+                                        <td style="padding:5px 10px;border-bottom:1px solid #e2e8f0;font-size:13px;color:#b45309;">
+                                            Week <?= (int) $wp['weekNo'] ?>
+                                            <span style="color:#64748b;">(<?= formatDate(htmlspecialchars($wp['weekStart'])) ?>)</span>:
+                                            <?= htmlspecialchars(implode('; ', $wp['problems'])) ?>
+                                        </td>
+                                    </tr>
+                                <?php endforeach; ?>
+                            <?php endforeach; ?>
+                        </tbody>
+                    </table>
+                <?php endforeach; ?>
+            </div>
+        </div>
+    </noprint>
+    <?php endif; ?>
 </body>
 
 </html>

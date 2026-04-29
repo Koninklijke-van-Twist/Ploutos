@@ -121,6 +121,381 @@ function csv_decimal_quarters(float $h): string
     return str_replace('.', ',', round_to_quarters($h));
 }
 
+function issue_filter_definitions(): array
+{
+    return [
+        'missing' => 'Ontbrekende urenstaten',
+        'unapproved' => 'Niet-goedgekeurde urenstaten',
+        'invalid' => 'Onjuist ingevulde urenstaten',
+    ];
+}
+
+function normalize_issue_filters(array $input): array
+{
+    $normalized = [];
+    foreach (array_keys(issue_filter_definitions()) as $key) {
+        $normalized[$key] = !empty($input[$key]);
+    }
+
+    return $normalized;
+}
+
+function active_issue_filter_keys(array $filters): array
+{
+    return array_values(array_keys(array_filter($filters)));
+}
+
+function issue_title_from_filters(array $filters): string
+{
+    $definitions = issue_filter_definitions();
+    $labels = [];
+
+    foreach (active_issue_filter_keys($filters) as $key) {
+        if (isset($definitions[$key])) {
+            $labels[] = strtolower($definitions[$key]);
+        }
+    }
+
+    if (!$labels) {
+        return 'Urenstaatmeldingen';
+    }
+
+    if (count($labels) === 1) {
+        return ucfirst($labels[0]);
+    }
+    if (count($labels) === 2) {
+        return ucfirst($labels[0] . ' en ' . $labels[1]);
+    }
+
+    $last = array_pop($labels);
+    return ucfirst(implode(', ', $labels) . ' en ' . $last);
+}
+
+function issue_filter_matches(array $issueTypes, array $filters): bool
+{
+    $activeKeys = active_issue_filter_keys($filters);
+    if (!$activeKeys) {
+        return false;
+    }
+
+    foreach ($activeKeys as $key) {
+        if (!empty($issueTypes[$key])) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+function issue_filters_present_in_rows(array $persons, array $filters): array
+{
+    $result = normalize_issue_filters([
+        'missing' => false,
+        'unapproved' => false,
+        'invalid' => false,
+    ]);
+    foreach (array_keys($result) as $key) {
+        $result[$key] = false;
+    }
+
+    foreach ($persons as $person) {
+        foreach ((array) ($person['issueRows'] ?? []) as $issueRow) {
+            $issueTypes = (array) ($issueRow['issueTypes'] ?? []);
+            if (!issue_filter_matches($issueTypes, $filters)) {
+                continue;
+            }
+
+            foreach (array_keys($result) as $key) {
+                if (!empty($issueTypes[$key])) {
+                    $result[$key] = true;
+                }
+            }
+        }
+    }
+
+    return $result;
+}
+
+function approver_mail_domain(): string
+{
+    return 'kvt.nl';
+}
+
+function company_name_from_base(string $base): string
+{
+    if (preg_match("~Company\\('([^']+)'\\)~", $base, $matches) !== 1) {
+        return '';
+    }
+
+    return rawurldecode((string) ($matches[1] ?? ''));
+}
+
+function approver_mail_domain_for_company(string $companyName): string
+{
+    $companyName = trim(strtolower($companyName));
+    if ($companyName === 'hunter van twist') {
+        return 'hunter.be';
+    }
+    if ($companyName === 'koninklijke van twist') {
+        return 'kvt.nl';
+    }
+    if ($companyName === 'kvt gas') {
+        return 'kvt.nl';
+    }
+
+    return approver_mail_domain();
+}
+
+function derive_approver_email_from_user_id(string $approverUserId, string $mailDomain): string
+{
+    $approverUserId = trim($approverUserId);
+    if ($approverUserId === '') {
+        return '';
+    }
+
+    if (filter_var($approverUserId, FILTER_VALIDATE_EMAIL)) {
+        return $approverUserId;
+    }
+
+    $mailDomain = trim(strtolower($mailDomain));
+    if ($mailDomain === '') {
+        return '';
+    }
+
+    $normalizedUserId = str_replace('\\', '/', $approverUserId);
+    $parts = explode('/', $normalizedUserId);
+    $localPart = strtolower(trim((string) end($parts)));
+    $localPart = preg_replace('/[^a-z0-9._-]+/', '', $localPart);
+    if ($localPart === '') {
+        return '';
+    }
+
+    return $localPart . '@' . $mailDomain;
+}
+
+function build_issue_mail_subject(array $filters, string $from, string $to, array $mailSettings): string
+{
+    $prefix = trim((string) ($mailSettings['subject_prefix'] ?? ''));
+    $subject = issue_title_from_filters($filters) . ' ' . formatDate($from) . ' t/m ' . formatDate($to);
+
+    return $prefix !== '' ? ($prefix . ' - ' . $subject) : $subject;
+}
+
+function mail_header_value(string $value): string
+{
+    return trim(preg_replace('/[\r\n]+/', ' ', $value));
+}
+
+function format_mail_address(string $email, string $name = ''): string
+{
+    $email = mail_header_value($email);
+    $name = trim($name);
+    if ($name === '') {
+        return $email;
+    }
+
+    return '=?UTF-8?B?' . base64_encode(mail_header_value($name)) . '?= <' . $email . '>';
+}
+
+function smtp_expect($socket, array $expectedCodes): string
+{
+    $response = '';
+    while (!feof($socket)) {
+        $line = fgets($socket, 515);
+        if ($line === false) {
+            break;
+        }
+        $response .= $line;
+        if (preg_match('/^([0-9]{3})([ -])/', $line, $matches) === 1 && $matches[2] === ' ') {
+            $code = (int) $matches[1];
+            if (!in_array($code, $expectedCodes, true)) {
+                throw new RuntimeException('SMTP fout: ' . trim($response));
+            }
+            return $response;
+        }
+    }
+
+    throw new RuntimeException('Onvolledige SMTP response ontvangen.');
+}
+
+function smtp_command($socket, string $command, array $expectedCodes): string
+{
+    fwrite($socket, $command . "\r\n");
+    return smtp_expect($socket, $expectedCodes);
+}
+
+function send_mail_via_smtp(array $mailSettings, array $message): void
+{
+    $smtp = (array) ($mailSettings['smtp'] ?? []);
+    $host = trim((string) ($smtp['host'] ?? ''));
+    $port = (int) ($smtp['port'] ?? 25);
+    $timeout = max(1, (int) ($smtp['timeout'] ?? 20));
+    $encryption = strtolower(trim((string) ($smtp['encryption'] ?? '')));
+    $username = (string) ($smtp['username'] ?? '');
+    $password = (string) ($smtp['password'] ?? '');
+
+    if ($host === '') {
+        throw new RuntimeException('SMTP host ontbreekt in auth.php.');
+    }
+
+    $transport = $encryption === 'ssl' ? 'ssl://' : 'tcp://';
+    $socket = @stream_socket_client($transport . $host . ':' . $port, $errno, $errstr, $timeout, STREAM_CLIENT_CONNECT);
+    if ($socket === false) {
+        throw new RuntimeException('SMTP verbinding mislukt: ' . $errstr . ' (' . $errno . ')');
+    }
+
+    stream_set_timeout($socket, $timeout);
+    $hostname = gethostname() ?: 'localhost';
+
+    try {
+        smtp_expect($socket, [220]);
+        smtp_command($socket, 'EHLO ' . $hostname, [250]);
+
+        if ($encryption === 'tls') {
+            smtp_command($socket, 'STARTTLS', [220]);
+            if (!stream_socket_enable_crypto($socket, true, STREAM_CRYPTO_METHOD_TLS_CLIENT)) {
+                throw new RuntimeException('STARTTLS kon niet worden gestart.');
+            }
+            smtp_command($socket, 'EHLO ' . $hostname, [250]);
+        }
+
+        if ($username !== '') {
+            smtp_command($socket, 'AUTH LOGIN', [334]);
+            smtp_command($socket, base64_encode($username), [334]);
+            smtp_command($socket, base64_encode($password), [235]);
+        }
+
+        smtp_command($socket, 'MAIL FROM:<' . $message['from_email'] . '>', [250]);
+        foreach ($message['recipients'] as $recipient) {
+            smtp_command($socket, 'RCPT TO:<' . $recipient . '>', [250, 251]);
+        }
+
+        smtp_command($socket, 'DATA', [354]);
+        $data = preg_replace('/(^|\r\n)\./', '$1..', $message['raw']);
+        fwrite($socket, $data . "\r\n.\r\n");
+        smtp_expect($socket, [250]);
+        smtp_command($socket, 'QUIT', [221]);
+    } finally {
+        fclose($socket);
+    }
+}
+
+function send_html_mail(array $mailSettings, string $toEmail, string $toName, array $ccEmails, string $subject, string $htmlBody): void
+{
+    $fromEmail = trim((string) ($mailSettings['from_email'] ?? ''));
+    $fromName = trim((string) ($mailSettings['from_name'] ?? ''));
+    if ($fromEmail === '') {
+        throw new RuntimeException('Afzender e-mailadres ontbreekt in auth.php.');
+    }
+
+    $toEmail = trim($toEmail);
+    if ($toEmail === '') {
+        throw new RuntimeException('Geen ontvanger e-mailadres gevonden.');
+    }
+
+    $ccEmails = array_values(array_unique(array_filter(array_map('trim', $ccEmails), fn($email) => $email !== '')));
+    $headers = [
+        'MIME-Version: 1.0',
+        'Content-Type: text/html; charset=UTF-8',
+        'From: ' . format_mail_address($fromEmail, $fromName),
+    ];
+    if ($ccEmails) {
+        $headers[] = 'Cc: ' . implode(', ', $ccEmails);
+    }
+
+    $subjectHeader = '=?UTF-8?B?' . base64_encode(mail_header_value($subject)) . '?=';
+    $body = '<!doctype html><html lang="nl"><head><meta charset="utf-8"></head><body style="margin:0;padding:24px;background:#f8fafc;font-family:Verdana,Geneva,Tahoma,sans-serif;color:#0f172a;">'
+        . $htmlBody
+        . '</body></html>';
+
+    $transport = strtolower(trim((string) ($mailSettings['transport'] ?? 'mail')));
+    $canUseSmtp = trim((string) (($mailSettings['smtp']['host'] ?? ''))) !== '';
+
+    if ($transport === 'smtp') {
+        $raw = implode("\r\n", array_merge([
+            'Date: ' . date(DATE_RFC2822),
+            'Subject: ' . $subjectHeader,
+            'To: ' . format_mail_address($toEmail, $toName),
+        ], $headers)) . "\r\n\r\n" . $body;
+
+        send_mail_via_smtp($mailSettings, [
+            'from_email' => $fromEmail,
+            'recipients' => array_values(array_unique(array_merge([$toEmail], $ccEmails))),
+            'raw' => $raw,
+        ]);
+        return;
+    }
+
+    if (@mail(format_mail_address($toEmail, $toName), $subjectHeader, $body, implode("\r\n", $headers))) {
+        return;
+    }
+
+    if ($canUseSmtp) {
+        $raw = implode("\r\n", array_merge([
+            'Date: ' . date(DATE_RFC2822),
+            'Subject: ' . $subjectHeader,
+            'To: ' . format_mail_address($toEmail, $toName),
+        ], $headers)) . "\r\n\r\n" . $body;
+
+        send_mail_via_smtp($mailSettings, [
+            'from_email' => $fromEmail,
+            'recipients' => array_values(array_unique(array_merge([$toEmail], $ccEmails))),
+            'raw' => $raw,
+        ]);
+        return;
+    }
+
+    if (!$canUseSmtp) {
+        throw new RuntimeException('mail() kon het bericht niet verzenden.');
+    }
+}
+
+function build_issue_mail_html(string $approverLabel, array $persons, array $filters, string $from, string $to): string
+{
+    $effectiveFilters = issue_filters_present_in_rows($persons, $filters);
+
+    $rowsHtml = '';
+    foreach ($persons as $person) {
+        foreach ((array) ($person['issueRows'] ?? []) as $issueRow) {
+            if (!issue_filter_matches((array) ($issueRow['issueTypes'] ?? []), $filters)) {
+                continue;
+            }
+
+            $rowsHtml .= '<tr>'
+                . '<td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;vertical-align:top;font-size:13px;">' . htmlspecialchars((string) ($person['name'] ?? ''), ENT_QUOTES, 'UTF-8') . '</td>'
+                . '<td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;font-size:13px;color:#92400e;">' . htmlspecialchars((string) ($issueRow['label'] ?? ''), ENT_QUOTES, 'UTF-8') . '</td>'
+                . '</tr>';
+        }
+    }
+
+    if ($rowsHtml === '') {
+        $rowsHtml = '<tr><td colspan="2" style="padding:10px;border-bottom:1px solid #e2e8f0;font-size:13px;color:#475569;">Er zijn geen meldingen voor de geselecteerde filters.</td></tr>';
+    }
+
+    $activeFilters = [];
+    foreach (active_issue_filter_keys($filters) as $key) {
+        $activeFilters[] = htmlspecialchars((string) (issue_filter_definitions()[$key] ?? $key), ENT_QUOTES, 'UTF-8');
+    }
+    if (!$activeFilters) {
+        $activeFilters[] = 'geen filters geselecteerd';
+    }
+
+    return '<div style="max-width:900px;margin:0 auto;background:#ffffff;border:1px solid #cbd5e1;border-radius:16px;overflow:hidden;box-shadow:0 12px 32px rgba(15,23,42,0.08);">'
+        . '<div style="padding:20px 24px;background:#1e3a5f;color:#ffffff;">'
+        . '<div style="font-size:12px;letter-spacing:0.04em;text-transform:uppercase;opacity:0.82;">Urenstatenoverzicht</div>'
+        . '<h1 style="margin:8px 0 4px;font-size:24px;line-height:1.2;">' . htmlspecialchars(issue_title_from_filters($effectiveFilters), ENT_QUOTES, 'UTF-8') . '</h1>'
+        . '<div style="font-size:14px;opacity:0.9;">' . htmlspecialchars(formatDate($from) . ' t/m ' . formatDate($to), ENT_QUOTES, 'UTF-8') . '</div>'
+        . '<div style="margin-top:10px;font-size:13px;opacity:0.92;">Goedkeurder: ' . htmlspecialchars($approverLabel, ENT_QUOTES, 'UTF-8') . '</div>'
+        . '</div>'
+        . '<div style="padding:20px 24px;">'
+        . '<table style="width:100%;border-collapse:collapse;background:#ffffff;">'
+        . '<thead><tr><th style="text-align:left;padding:8px 10px;background:#f1f5f9;border-bottom:2px solid #cbd5e1;font-size:13px;width:220px;">Medewerker</th><th style="text-align:left;padding:8px 10px;background:#f1f5f9;border-bottom:2px solid #cbd5e1;font-size:13px;">Probleem</th></tr></thead>'
+        . '<tbody>' . $rowsHtml . '</tbody>'
+        . '</table>'
+        . '</div>'
+        . '</div>';
+}
+
 function expense_export_columns(): array
 {
     return [
@@ -313,6 +688,19 @@ if ($selectedApproverUserId !== '') {
 }
 $approverUserIds = array_keys($approverUserIdOptions);
 sort($approverUserIds, SORT_NATURAL | SORT_FLAG_CASE);
+
+$companyName = company_name_from_base($base);
+$approverMailDomain = approver_mail_domain_for_company($companyName);
+
+$approverEmailsByUserId = [];
+if ($approverUserIds) {
+    foreach ($approverUserIds as $approverUserId) {
+        $derivedEmail = derive_approver_email_from_user_id($approverUserId, $approverMailDomain);
+        if ($derivedEmail !== '') {
+            $approverEmailsByUserId[$approverUserId] = $derivedEmail;
+        }
+    }
+}
 
 // Aggregatie: personNo + timesheetNo (week)
 $byPerson = []; // personNo => ['name'=>..., 'weeks'=>[tsNo=>row]]
@@ -543,11 +931,14 @@ $issuesByApprover = [];
 foreach ($byPerson as $person) {
     $missingWeeks = (array) ($person['missingWeekLabels'] ?? []);
     $weeksWithProblems = [];
+    $issueRows = [];
     foreach ($person['weeks'] as $w) {
         $problems = [];
+        $issueTypes = ['missing' => false, 'unapproved' => false, 'invalid' => false];
         if (!empty($w['hasUnapproved'])) {
             $cnt = (int) ($w['unapprovedCount'] ?? 0);
             $problems[] = $cnt . ' niet-goedgekeurde regel' . ($cnt === 1 ? '' : 's');
+            $issueTypes['unapproved'] = true;
         }
         if (!empty($w['hasHourIssues'])) {
             $dayNames = ['Ma', 'Di', 'Wo', 'Do', 'Vr', 'Za', 'Zo'];
@@ -569,12 +960,18 @@ foreach ($byPerson as $person) {
                 }
             }
             $problems[] = 'Onjuiste uren' . ($dayIssueDescs ? ' (' . implode('; ', $dayIssueDescs) . ')' : '');
+            $issueTypes['invalid'] = true;
         }
         if ($problems) {
             $weeksWithProblems[] = [
-                'weekNo'    => (int) ($w['weekNo'] ?? 0),
+                'weekNo' => (int) ($w['weekNo'] ?? 0),
                 'weekStart' => (string) ($w['weekStart'] ?? ''),
-                'problems'  => $problems,
+                'problems' => $problems,
+                'issueTypes' => $issueTypes,
+            ];
+            $issueRows[] = [
+                'label' => 'Week ' . (int) ($w['weekNo'] ?? 0) . ' (' . formatDate((string) ($w['weekStart'] ?? '')) . '): ' . implode('; ', $problems),
+                'issueTypes' => $issueTypes,
             ];
         }
     }
@@ -583,19 +980,102 @@ foreach ($byPerson as $person) {
         continue;
     }
 
+    if ($missingWeeks) {
+        $issueRows[] = [
+            'label' => 'Ontbrekende urenstaten: ' . implode(', ', $missingWeeks),
+            'issueTypes' => ['missing' => true, 'unapproved' => false, 'invalid' => false],
+        ];
+    }
+
     $approver = (string) ($person['timesheetApproverUserId'] ?? '');
     $approverKey = $approver !== '' ? $approver : '(geen goedkeurder)';
     if (!isset($issuesByApprover[$approverKey])) {
-        $issuesByApprover[$approverKey] = [];
+        $issuesByApprover[$approverKey] = [
+            'approverUserId' => $approver,
+            'approverLabel' => $approverKey,
+            'approverEmail' => (string) ($approverEmailsByUserId[$approver] ?? ''),
+            'persons' => [],
+        ];
     }
-    $issuesByApprover[$approverKey][] = [
-        'name'               => (string) ($person['name'] ?? ''),
-        'missingWeeks'       => $missingWeeks,
-        'weeksWithProblems'  => $weeksWithProblems,
+    $issuesByApprover[$approverKey]['persons'][] = [
+        'name' => (string) ($person['name'] ?? ''),
+        'missingWeeks' => $missingWeeks,
+        'weeksWithProblems' => $weeksWithProblems,
+        'issueRows' => $issueRows,
     ];
 }
 ksort($issuesByApprover, SORT_NATURAL | SORT_FLAG_CASE);
-$totalIssuePersons = array_sum(array_map('count', $issuesByApprover));
+$totalIssuePersons = array_sum(array_map(fn($group) => count((array) ($group['persons'] ?? [])), $issuesByApprover));
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && (string) ($_POST['action'] ?? '') === 'email_issue_overview') {
+    $postFilters = normalize_issue_filters([
+        'missing' => (string) ($_POST['issue_missing'] ?? '') === '1',
+        'unapproved' => (string) ($_POST['issue_unapproved'] ?? '') === '1',
+        'invalid' => (string) ($_POST['issue_invalid'] ?? '') === '1',
+    ]);
+    $postApproverKey = (string) ($_POST['approver_key'] ?? '');
+    $redirectParams = [];
+    if ($from !== '') {
+        $redirectParams['from'] = $from;
+    }
+    if ($to !== '') {
+        $redirectParams['to'] = $to;
+    }
+    if ($month !== '') {
+        $redirectParams['month'] = $month;
+    }
+    if ($selectedApproverUserId !== '') {
+        $redirectParams['approverUserId'] = $selectedApproverUserId;
+    }
+    $redirectParams['issuesOpen'] = '1';
+    $redirectParams['issue_missing'] = !empty($postFilters['missing']) ? '1' : '0';
+    $redirectParams['issue_unapproved'] = !empty($postFilters['unapproved']) ? '1' : '0';
+    $redirectParams['issue_invalid'] = !empty($postFilters['invalid']) ? '1' : '0';
+    $redirectParams['issueApprover'] = $postApproverKey;
+
+    try {
+        if ($postApproverKey === '' || !isset($issuesByApprover[$postApproverKey])) {
+            throw new RuntimeException('De geselecteerde goedkeurder is niet gevonden.');
+        }
+
+        $group = (array) $issuesByApprover[$postApproverKey];
+        $sessionEmail = trim((string) ($_SESSION['user']['email'] ?? ''));
+        $isLocalTester = ($sessionEmail === '');
+
+        $toEmail = $isLocalTester
+            ? 'tfalken@kvt.nl'
+            : trim((string) ($group['approverEmail'] ?? ''));
+        if ($toEmail === '') {
+            throw new RuntimeException('Geen e-mailadres gevonden voor deze goedkeurder.');
+        }
+
+        $ccEmails = [];
+        if ($sessionEmail !== '') {
+            $ccEmails[] = $sessionEmail;
+        }
+
+        $toName = $isLocalTester
+            ? 'Lokale tester fallback'
+            : (string) ($group['approverLabel'] ?? $postApproverKey);
+
+        $mailSubjectFilters = issue_filters_present_in_rows((array) ($group['persons'] ?? []), $postFilters);
+        $subject = build_issue_mail_subject($mailSubjectFilters, $from, $to, $mailSettings);
+        $body = build_issue_mail_html((string) ($group['approverLabel'] ?? $postApproverKey), (array) ($group['persons'] ?? []), $postFilters, $from, $to);
+        send_html_mail($mailSettings, $toEmail, $toName, $ccEmails, $subject, $body);
+
+        $redirectParams['mailStatus'] = 'success';
+        $redirectParams['mailMessage'] = 'E-mail verzonden naar ' . $toEmail . '.';
+    } catch (Throwable $e) {
+        $redirectParams['mailStatus'] = 'error';
+        $redirectParams['mailMessage'] = $e->getMessage();
+    }
+
+    header('Location: overzicht.php?' . http_build_query($redirectParams));
+    exit;
+}
+
+$mailStatus = trim((string) ($_GET['mailStatus'] ?? ''));
+$mailMessage = trim((string) ($_GET['mailMessage'] ?? ''));
 
 if ((string) ($_GET['export'] ?? '') === 'csv') {
     $filenameSuffix = $month !== '' ? $month : ($from . '_' . $to);
@@ -793,6 +1273,84 @@ function hhmm(float|int $min): string
             margin: -6px 0 10px;
             font-size: 12px;
             color: #9a3412;
+        }
+
+        .issues-toolbar {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            margin: 0 0 18px;
+        }
+
+        .issues-filter-group {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .issues-filter-chip {
+            border: 1px solid #cbd5e1;
+            background: #fff;
+            color: #334155;
+            border-radius: 999px;
+            padding: 7px 12px;
+            font-size: 13px;
+            font-weight: 700;
+            cursor: pointer;
+        }
+
+        .issues-filter-chip.active {
+            background: #1e3a5f;
+            border-color: #1e3a5f;
+            color: #fff;
+        }
+
+        .issues-approver-header {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: space-between;
+            align-items: center;
+            gap: 10px;
+            color: #1e3a5f;
+            margin: 20px 0 6px;
+            font-size: 14px;
+            border-bottom: 2px solid #cbd5e1;
+            padding-bottom: 4px;
+        }
+
+        .issues-email-form {
+            margin: 0;
+        }
+
+        .issues-email-hint {
+            font-size: 12px;
+            color: #64748b;
+        }
+
+        .issues-row[data-visible="false"] {
+            display: none;
+        }
+
+        .flash-message {
+            margin: 0 0 12px;
+            padding: 10px 12px;
+            border-radius: 10px;
+            border: 1px solid #cbd5e1;
+            font-size: 14px;
+        }
+
+        .flash-message.success {
+            background: #f0fdf4;
+            border-color: #86efac;
+            color: #166534;
+        }
+
+        .flash-message.error {
+            background: #fef2f2;
+            border-color: #fca5a5;
+            color: #991b1b;
         }
 
         .zeroTotal {
@@ -1082,14 +1640,21 @@ function hhmm(float|int $min): string
 <body>
     <?php $expenseColumns = expense_export_columns(); ?>
     <div class="wrap">
+        <?php if ($mailMessage !== ''): ?>
+            <noprint>
+                <div class="flash-message <?= $mailStatus === 'success' ? 'success' : 'error' ?>">
+                    <?= htmlspecialchars($mailMessage) ?>
+                </div>
+            </noprint>
+        <?php endif; ?>
         <?php if ($totalIssuePersons > 0): ?>
-        <noprint>
-            <button class="btn btn-issues-alert"
-                onclick="document.getElementById('issuesModal').classList.add('active')"
-                style="background:#fef2f2;border-color:#fca5a5;color:#991b1b;font-weight:700;margin-bottom:8px;">
-                ⚠️ Missende / onjuiste urenstaten (<?= $totalIssuePersons ?>)
-            </button>
-        </noprint>
+            <noprint>
+                <button class="btn btn-issues-alert"
+                    onclick="document.getElementById('issuesModal').classList.add('active')"
+                    style="background:#fef2f2;border-color:#fca5a5;color:#991b1b;font-weight:700;margin-bottom:8px;">
+                    ⚠️ Missende / onjuiste urenstaten (<?= $totalIssuePersons ?>)
+                </button>
+            </noprint>
         <?php endif; ?>
         <noprint>
             <?= injectTimerHtml([
@@ -1161,7 +1726,7 @@ function hhmm(float|int $min): string
                     <div class="person-missing-weeks"
                         title="Ontbrekende weken: <?= htmlspecialchars(implode(', ', $missingWeekDates)) ?>">
                         Ontbrekende urenstaten:
-                        <?= htmlspecialchars(implode(', ', $visibleMissingLabels)) ?>        <?= $hasMoreMissing ? ', ...' : '' ?>
+                        <?= htmlspecialchars(implode(', ', $visibleMissingLabels)) ?>         <?= $hasMoreMissing ? ', ...' : '' ?>
                     </div>
                 <?php endif; ?>
                 <noprint>
@@ -1428,6 +1993,239 @@ function hhmm(float|int $min): string
                 showPageLoader();
                 approverForm.submit();
             });
+        }
+
+        function setupIssueFilters ()
+        {
+            const filterButtons = Array.from(document.querySelectorAll('[data-issue-filter]'));
+            const issueRows = Array.from(document.querySelectorAll('.issues-row'));
+            const hiddenInputs = Array.from(document.querySelectorAll('[data-issue-hidden]'));
+            if (!filterButtons.length)
+            {
+                return;
+            }
+
+            const activeFilters = new Set(filterButtons.map(function (button)
+            {
+                return button.dataset.issueFilter;
+            }));
+
+            const params = new URLSearchParams(window.location.search);
+            const hasFilterParams = ['issue_missing', 'issue_unapproved', 'issue_invalid'].some(function (key)
+            {
+                return params.has(key);
+            });
+            if (hasFilterParams)
+            {
+                activeFilters.clear();
+                filterButtons.forEach(function (button)
+                {
+                    const key = button.dataset.issueFilter;
+                    const paramValue = params.get('issue_' + key);
+                    if (paramValue === '1')
+                    {
+                        activeFilters.add(key);
+                    }
+                });
+            }
+
+            function syncHiddenInputs ()
+            {
+                hiddenInputs.forEach(function (input)
+                {
+                    input.value = activeFilters.has(input.dataset.issueHidden) ? '1' : '0';
+                });
+            }
+
+            function applyFilters ()
+            {
+                filterButtons.forEach(function (button)
+                {
+                    button.classList.toggle('active', activeFilters.has(button.dataset.issueFilter));
+                });
+
+                const visibleRowsByGroup = new Map();
+
+                issueRows.forEach(function (row)
+                {
+                    const rowTypes = String(row.dataset.issueTypes || '').split(/\s+/).filter(Boolean);
+                    const visible = rowTypes.some(function (type)
+                    {
+                        return activeFilters.has(type);
+                    });
+                    row.dataset.visible = visible ? 'true' : 'false';
+
+                    if (visible)
+                    {
+                        const group = String(row.dataset.approverGroup || '');
+                        if (group !== '')
+                        {
+                            visibleRowsByGroup.set(group, true);
+                        }
+                    }
+                });
+
+                document.querySelectorAll('.issues-email-form[data-approver-group]').forEach(function (form)
+                {
+                    const group = String(form.dataset.approverGroup || '');
+                    const hasVisibleRows = visibleRowsByGroup.get(group) === true;
+                    form.style.display = hasVisibleRows ? '' : 'none';
+                });
+
+                syncHiddenInputs();
+            }
+
+            filterButtons.forEach(function (button)
+            {
+                button.addEventListener('click', function ()
+                {
+                    const key = button.dataset.issueFilter;
+                    if (activeFilters.has(key))
+                    {
+                        activeFilters.delete(key);
+                    }
+                    else
+                    {
+                        activeFilters.add(key);
+                    }
+                    applyFilters();
+                });
+            });
+
+            applyFilters();
+        }
+
+        function restoreIssuesModalState ()
+        {
+            const params = new URLSearchParams(window.location.search);
+            if (params.get('issuesOpen') !== '1')
+            {
+                return;
+            }
+
+            const issuesModal = document.getElementById('issuesModal');
+            if (!issuesModal)
+            {
+                return;
+            }
+
+            issuesModal.classList.add('active');
+            const approverKey = params.get('issueApprover') || '';
+            if (approverKey === '')
+            {
+                return;
+            }
+
+            const forms = Array.from(document.querySelectorAll('.issues-email-form[data-approver-key]'));
+            const target = forms.find(function (form)
+            {
+                return String(form.dataset.approverKey || '') === approverKey;
+            });
+
+            if (target)
+            {
+                target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+        }
+
+        function clearIssuesModalUrlState ()
+        {
+            const url = new URL(window.location.href);
+            ['issuesOpen', 'issue_missing', 'issue_unapproved', 'issue_invalid', 'issueApprover'].forEach(function (key)
+            {
+                url.searchParams.delete(key);
+            });
+
+            const nextUrl = url.pathname + (url.search ? ('?' + url.searchParams.toString()) : '') + url.hash;
+            window.history.replaceState({}, document.title, nextUrl);
+        }
+
+        function closeIssuesModal ()
+        {
+            const issuesModal = document.getElementById('issuesModal');
+            if (!issuesModal)
+            {
+                return;
+            }
+
+            issuesModal.classList.remove('active');
+            clearIssuesModalUrlState();
+        }
+
+        function bindIssuesModalCloseHandlers ()
+        {
+            const issuesModal = document.getElementById('issuesModal');
+            if (!issuesModal)
+            {
+                return;
+            }
+
+            issuesModal.addEventListener('click', function (event)
+            {
+                if (event.target === issuesModal)
+                {
+                    closeIssuesModal();
+                }
+            });
+        }
+
+        function bindIssueMailSubmitLoader ()
+        {
+            document.querySelectorAll('.issues-email-form').forEach(function (form)
+            {
+                form.addEventListener('submit', function (event)
+                {
+                    if (form.dataset.submitting === '1')
+                    {
+                        return;
+                    }
+
+                    event.preventDefault();
+                    form.dataset.submitting = '1';
+                    showPageLoader();
+
+                    window.setTimeout(function ()
+                    {
+                        form.submit();
+                    }, 30);
+                });
+            });
+        }
+
+        if (document.readyState === 'loading')
+        {
+            document.addEventListener('DOMContentLoaded', setupIssueFilters, { once: true });
+        }
+        else
+        {
+            setupIssueFilters();
+        }
+
+        if (document.readyState === 'loading')
+        {
+            document.addEventListener('DOMContentLoaded', restoreIssuesModalState, { once: true });
+        }
+        else
+        {
+            restoreIssuesModalState();
+        }
+
+        if (document.readyState === 'loading')
+        {
+            document.addEventListener('DOMContentLoaded', bindIssueMailSubmitLoader, { once: true });
+        }
+        else
+        {
+            bindIssueMailSubmitLoader();
+        }
+
+        if (document.readyState === 'loading')
+        {
+            document.addEventListener('DOMContentLoaded', bindIssuesModalCloseHandlers, { once: true });
+        }
+        else
+        {
+            bindIssuesModalCloseHandlers();
         }
 
         (function restorePersonScroll ()
@@ -1741,55 +2539,101 @@ function hhmm(float|int $min): string
     </script>
 
     <?php if ($totalIssuePersons > 0): ?>
-    <noprint>
-        <div id="issuesModal" class="print-modal" role="dialog" aria-modal="true"
-             aria-label="Missende of onjuiste urenstaten">
-            <div class="print-modal-content">
-                <button class="print-close-btn"
-                    onclick="document.getElementById('issuesModal').classList.remove('active')">Sluiten</button>
-                <h2 style="margin-top:0;margin-bottom:16px;">Missende / onjuiste urenstaten</h2>
-                <?php foreach ($issuesByApprover as $approverKey => $persons): ?>
-                    <h3 style="color:#1e3a5f;margin:20px 0 6px;font-size:14px;border-bottom:2px solid #cbd5e1;padding-bottom:4px;">
-                        <?= htmlspecialchars($approverKey) ?>
-                    </h3>
-                    <table style="width:100%;border-collapse:collapse;margin-bottom:8px;">
-                        <thead>
-                            <tr>
-                                <th style="text-align:left;padding:6px 10px;background:#f1f5f9;border-bottom:2px solid #cbd5e1;font-size:13px;width:220px;">Medewerker</th>
-                                <th style="text-align:left;padding:6px 10px;background:#f1f5f9;border-bottom:2px solid #cbd5e1;font-size:13px;">Probleem</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <?php foreach ($persons as $p): ?>
-                                <?php if ($p['missingWeeks']): ?>
-                                    <tr>
-                                        <td style="padding:5px 10px;border-bottom:1px solid #e2e8f0;vertical-align:top;font-size:13px;">
-                                            <?= htmlspecialchars($p['name']) ?>
-                                        </td>
-                                        <td style="padding:5px 10px;border-bottom:1px solid #e2e8f0;font-size:13px;color:#9a3412;">
-                                            Ontbrekende urenstaten: <?= htmlspecialchars(implode(', ', $p['missingWeeks'])) ?>
-                                        </td>
-                                    </tr>
-                                <?php endif; ?>
-                                <?php foreach ($p['weeksWithProblems'] as $wp): ?>
-                                    <tr>
-                                        <td style="padding:5px 10px;border-bottom:1px solid #e2e8f0;vertical-align:top;font-size:13px;">
-                                            <?= htmlspecialchars($p['name']) ?>
-                                        </td>
-                                        <td style="padding:5px 10px;border-bottom:1px solid #e2e8f0;font-size:13px;color:#b45309;">
-                                            Week <?= (int) $wp['weekNo'] ?>
-                                            <span style="color:#64748b;">(<?= formatDate(htmlspecialchars($wp['weekStart'])) ?>)</span>:
-                                            <?= htmlspecialchars(implode('; ', $wp['problems'])) ?>
-                                        </td>
-                                    </tr>
-                                <?php endforeach; ?>
+        <?php $isLocalTester = trim((string) ($_SESSION['user']['email'] ?? '')) === ''; ?>
+        <noprint>
+            <div id="issuesModal" class="print-modal" role="dialog" aria-modal="true"
+                aria-label="Missende of onjuiste urenstaten">
+                <div class="print-modal-content">
+                    <button class="print-close-btn"
+                        onclick="closeIssuesModal()">Sluiten</button>
+                    <h2 style="margin-top:0;margin-bottom:16px;">Missende / onjuiste urenstaten</h2>
+                    <div class="issues-toolbar">
+                        <div class="issues-filter-group">
+                            <?php foreach (issue_filter_definitions() as $filterKey => $filterLabel): ?>
+                                <button type="button" class="issues-filter-chip active"
+                                    data-issue-filter="<?= htmlspecialchars($filterKey) ?>">
+                                    <?= htmlspecialchars($filterLabel) ?>
+                                </button>
                             <?php endforeach; ?>
-                        </tbody>
-                    </table>
-                <?php endforeach; ?>
+                        </div>
+                        <div class="issues-email-hint">De e-mail gebruikt precies deze filterselectie.</div>
+                    </div>
+                    <?php foreach ($issuesByApprover as $approverKey => $group): ?>
+                        <?php $persons = (array) ($group['persons'] ?? []); ?>
+                        <?php $approverDomId = 'issues-approver-' . substr(sha1((string) $approverKey), 0, 12); ?>
+                        <?php
+                        $buttonTargetEmail = $isLocalTester
+                            ? 'tfalken@kvt.nl'
+                            : trim((string) ($group['approverEmail'] ?? ''));
+                        $buttonDisabled = (!$isLocalTester && $buttonTargetEmail === '');
+                        $buttonTitle = $isLocalTester
+                            ? 'Lokale tester: verzending gaat naar tfalken@kvt.nl'
+                            : ($buttonDisabled ? 'Geen e-mailadres gevonden voor deze goedkeurder' : '');
+                        ?>
+                        <div class="issues-approver-header" id="<?= htmlspecialchars($approverDomId) ?>">
+                            <div><?= htmlspecialchars($approverKey) ?></div>
+                            <form method="post" class="issues-email-form" data-approver-key="<?= htmlspecialchars((string) $approverKey) ?>"
+                                data-approver-group="<?= htmlspecialchars($approverDomId) ?>"
+                                data-approver-id="<?= htmlspecialchars($approverDomId) ?>">
+                                <input type="hidden" name="action" value="email_issue_overview">
+                                <input type="hidden" name="approver_key" value="<?= htmlspecialchars($approverKey) ?>">
+                                <input type="hidden" name="issue_missing" value="1" data-issue-hidden="missing">
+                                <input type="hidden" name="issue_unapproved" value="1" data-issue-hidden="unapproved">
+                                <input type="hidden" name="issue_invalid" value="1" data-issue-hidden="invalid">
+                                <button class="btn" type="submit" <?= $buttonDisabled ? 'disabled' : '' ?>
+                                    <?= $buttonTitle !== '' ? 'title="' . htmlspecialchars($buttonTitle, ENT_QUOTES) . '"' : '' ?>>
+                                    <?= $isLocalTester ? '* ' : '' ?>Mail naar <?= htmlspecialchars($buttonTargetEmail !== '' ? $buttonTargetEmail : 'geen e-mail') ?>
+                                </button>
+                            </form>
+                        </div>
+                        <table style="width:100%;border-collapse:collapse;margin-bottom:8px;">
+                            <thead>
+                                <tr>
+                                    <th
+                                        style="text-align:left;padding:6px 10px;background:#f1f5f9;border-bottom:2px solid #cbd5e1;font-size:13px;width:220px;">
+                                        Medewerker</th>
+                                    <th
+                                        style="text-align:left;padding:6px 10px;background:#f1f5f9;border-bottom:2px solid #cbd5e1;font-size:13px;">
+                                        Probleem</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <?php foreach ($persons as $p): ?>
+                                    <?php if ($p['missingWeeks']): ?>
+                                        <tr class="issues-row" data-issue-types="missing"
+                                            data-approver-group="<?= htmlspecialchars($approverDomId) ?>">
+                                            <td
+                                                style="padding:5px 10px;border-bottom:1px solid #e2e8f0;vertical-align:top;font-size:13px;">
+                                                <?= htmlspecialchars($p['name']) ?>
+                                            </td>
+                                            <td style="padding:5px 10px;border-bottom:1px solid #e2e8f0;font-size:13px;color:#9a3412;">
+                                                Ontbrekende urenstaten: <?= htmlspecialchars(implode(', ', $p['missingWeeks'])) ?>
+                                            </td>
+                                        </tr>
+                                    <?php endif; ?>
+                                    <?php foreach ($p['weeksWithProblems'] as $wp): ?>
+                                        <tr class="issues-row"
+                                            data-approver-group="<?= htmlspecialchars($approverDomId) ?>"
+                                            data-issue-types="<?= htmlspecialchars(implode(' ', array_keys(array_filter((array) ($wp['issueTypes'] ?? []))))) ?>">
+                                            <td
+                                                style="padding:5px 10px;border-bottom:1px solid #e2e8f0;vertical-align:top;font-size:13px;">
+                                                <?= htmlspecialchars($p['name']) ?>
+                                            </td>
+                                            <td style="padding:5px 10px;border-bottom:1px solid #e2e8f0;font-size:13px;color:#b45309;">
+                                                Week <?= (int) $wp['weekNo'] ?>
+                                                <span
+                                                    style="color:#64748b;">(<?= formatDate(htmlspecialchars($wp['weekStart'])) ?>)</span>:
+                                                <?= htmlspecialchars(implode('; ', $wp['problems'])) ?>
+                                            </td>
+                                        </tr>
+                                    <?php endforeach; ?>
+                                <?php endforeach; ?>
+                            </tbody>
+                        </table>
+                    <?php endforeach; ?>
+                </div>
             </div>
-        </div>
-    </noprint>
+        </noprint>
     <?php endif; ?>
 </body>
 

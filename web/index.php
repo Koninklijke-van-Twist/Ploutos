@@ -6,150 +6,20 @@ error_reporting(E_ALL);
 require __DIR__ . "/odata.php";
 require __DIR__ . "/auth.php";
 require __DIR__ . "/logincheck.php";
-
-$hour = 3600;
-$day = $hour * 24;
-
-function odata_or_filter(string $field, array $values): string
-{
-    $parts = array_map(fn($v) => "$field eq '" . str_replace("'", "''", $v) . "'", $values);
-    return rawurlencode(implode(" or ", $parts));
-}
-
-function odata_fetch_by_or_filter(string $base, string $entity, string $select, string $field, array $values, array $auth, int $ttl, int $chunkSize = 60): array
-{
-    $values = array_values(array_unique(array_filter(array_map(fn($v) => (string) $v, $values), fn($v) => $v !== '')));
-    if (!$values) {
-        return [];
-    }
-
-    $rows = [];
-    foreach (array_chunk($values, $chunkSize) as $chunk) {
-        $filter = odata_or_filter($field, $chunk);
-        if ($filter === '') {
-            continue;
-        }
-        $url = $base . $entity . "?\$select={$select}&\$filter={$filter}&\$format=json";
-        $chunkRows = odata_get_all($url, $auth, $ttl);
-        if ($chunkRows) {
-            foreach ($chunkRows as $row) {
-                $rows[] = $row;
-            }
-        }
-    }
-
-    return $rows;
-}
-
-function odata_fetch_by_or_filter_safe(string $base, string $entity, string $select, string $field, array $values, array $auth, int $ttl, int $chunkSize = 40): array
-{
-    $values = array_values(array_unique(array_filter(array_map(fn($v) => (string) $v, $values), fn($v) => $v !== '')));
-    if (!$values) {
-        return [];
-    }
-
-    $rows = [];
-    foreach (array_chunk($values, $chunkSize) as $chunk) {
-        try {
-            $chunkRows = odata_fetch_by_or_filter($base, $entity, $select, $field, $chunk, $auth, $ttl, $chunkSize);
-            if ($chunkRows) {
-                foreach ($chunkRows as $row) {
-                    $rows[] = $row;
-                }
-            }
-        } catch (Exception $e) {
-            continue;
-        }
-    }
-
-    return $rows;
-}
-
-function get_valid_months(array $auth, string $base, int $day): array
-{
-    $now = new DateTimeImmutable("now");
-    $from = $now->modify("-24 months")->format("Y-m-d");
-
-    $filter = rawurlencode("Starting_Date ge $from");
-    $url = $base . "Urenstaten?\$select=No,Starting_Date,Ending_Date&\$filter={$filter}&\$format=json";
-    $rows = odata_get_all($url, $auth, $day);
-
-    $timesheetsByNo = [];
-    $tsNos = [];
-    foreach ($rows as $r) {
-        $no = (string) ($r['No'] ?? '');
-        if ($no === '') {
-            continue;
-        }
-        $timesheetsByNo[$no] = $r;
-        $tsNos[] = $no;
-    }
-
-    $lines = odata_fetch_by_or_filter_safe($base, 'Urenstaatregels', 'Time_Sheet_No,Header_Resource_No', 'Time_Sheet_No', $tsNos, $auth, 3600);
-    $validTsNos = [];
-    foreach ($lines as $line) {
-        $lineTsNo = (string) ($line['Time_Sheet_No'] ?? '');
-        if ($lineTsNo === '' || !isset($timesheetsByNo[$lineTsNo])) {
-            continue;
-        }
-
-        $resourceNo = (string) ($line['Header_Resource_No'] ?? '');
-        if ($resourceNo === '') {
-            continue;
-        }
-
-        $sd = (string) ($timesheetsByNo[$lineTsNo]['Starting_Date'] ?? '');
-        $ed = (string) ($timesheetsByNo[$lineTsNo]['Ending_Date'] ?? '');
-        if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $sd) || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $ed)) {
-            continue;
-        }
-
-        $validTsNos[$lineTsNo] = true;
-    }
-
-    $months = [];
-    foreach ($timesheetsByNo as $tsNo => $r) {
-        if (!isset($validTsNos[$tsNo])) {
-            continue;
-        }
-
-        $sd = (string) ($r['Starting_Date'] ?? '');
-        $ed = (string) ($r['Ending_Date'] ?? '');
-        if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $sd) || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $ed)) {
-            continue;
-        }
-
-        try {
-            $start = new DateTimeImmutable($sd);
-            $end = new DateTimeImmutable($ed);
-        } catch (Exception $e) {
-            continue;
-        }
-
-        if ($end < $start) {
-            continue;
-        }
-
-        $cursor = $start->modify('first day of this month');
-        $lastMonth = $end->modify('first day of this month');
-
-        while ($cursor <= $lastMonth) {
-            $months[$cursor->format('Y-m')] = true;
-            $cursor = $cursor->modify('+1 month');
-        }
-    }
-
-    $monthList = array_keys($months);
-    rsort($monthList);
-    return $monthList;
-}
+require __DIR__ . "/lib_timesheet_store.php";
 
 if ((string) ($_GET['action'] ?? '') === 'months') {
     header('Content-Type: application/json; charset=UTF-8');
     try {
-        echo json_encode(['ok' => true, 'months' => get_valid_months($auth, $base, $day)], JSON_UNESCAPED_UNICODE);
+        $store = timesheet_store_db();
+        echo json_encode([
+            'ok' => true,
+            'months' => timesheet_store_valid_months($store),
+            'ready' => timesheet_store_has_any($store),
+            'backfill_complete' => timesheet_store_backfill_complete($store),
+        ], JSON_UNESCAPED_UNICODE);
     } catch (Exception $e) {
-        echo json_encode(['ok' => false, 'months' => []], JSON_UNESCAPED_UNICODE);
+        echo json_encode(['ok' => false, 'months' => [], 'ready' => false, 'backfill_complete' => false], JSON_UNESCAPED_UNICODE);
     }
     exit;
 }
@@ -298,7 +168,7 @@ if ((string) ($_GET['action'] ?? '') === 'months') {
             <select id="monthSelect" name="month" disabled>
                 <option value="">Maanden laden…</option>
             </select>
-            <div id="monthStatus" class="hint">Maanden worden opgehaald uit Business Central…</div>
+            <div id="monthStatus" class="hint">Maanden worden uit de lokale cache geladen…</div>
             <div id="monthProgressWrap" class="progress-wrap active" aria-hidden="false">
                 <div class="progress-track">
                     <div id="monthProgressFill" class="progress-fill"></div>
@@ -391,7 +261,7 @@ if ((string) ($_GET['action'] ?? '') === 'months') {
                 loader?.classList.remove('active');
             }
 
-            function setMonthOptions (months)
+            function setMonthOptions (months, ready)
             {
                 monthSelect.innerHTML = '';
 
@@ -409,9 +279,13 @@ if ((string) ($_GET['action'] ?? '') === 'months') {
                 });
 
                 monthSelect.disabled = false;
-                monthStatus.textContent = months.length > 0
-                    ? 'Alleen maanden met geldige urenstaatregels worden getoond.'
-                    : 'Geen geldige maanden gevonden.';
+                if (months.length > 0) {
+                    monthStatus.textContent = 'Alleen maanden met urenstaatregels worden getoond.';
+                    return;
+                }
+                monthStatus.textContent = ready
+                    ? 'Geen maanden met urenstaatregels gevonden.'
+                    : 'De nachtelijke cache is nog niet gevuld. Maanden verschijnen na de sync om 02:00.';
             }
 
             function startMonthProgress ()
@@ -425,7 +299,7 @@ if ((string) ($_GET['action'] ?? '') === 'months') {
                 {
                     monthProgressFill.style.width = `${monthProgressValue}%`;
                 }
-                monthStatus.textContent = 'Maanden worden opgehaald uit Business Central…';
+                monthStatus.textContent = 'Maanden worden uit de lokale cache geladen…';
 
                 if (monthProgressTimer)
                 {
@@ -460,7 +334,7 @@ if ((string) ($_GET['action'] ?? '') === 'months') {
                     if (!monthReachedWaitState && monthProgressValue >= 92)
                     {
                         monthReachedWaitState = true;
-                        monthStatus.textContent = 'Maanden worden opgehaald uit Business Central… cache opbouwen…';
+                        monthStatus.textContent = 'Maanden worden uit de lokale cache geladen…';
                     }
                 }, monthProgressConfig.tickMs);
             }
@@ -494,7 +368,7 @@ if ((string) ($_GET['action'] ?? '') === 'months') {
                         throw new Error('Invalid months payload');
                     }
 
-                    setMonthOptions(payload.months);
+                    setMonthOptions(payload.months, payload.ready !== false);
                 } catch (e)
                 {
                     monthSelect.innerHTML = '<option value="">— Kies maand —</option>';

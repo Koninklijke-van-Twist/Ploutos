@@ -3,7 +3,7 @@ ini_set('display_errors', 1);
 ini_set('display_startup_errors', 1);
 error_reporting(E_ALL);
 
-function odata_get_all(string $url, array $auth, $ttlSeconds = 300): array
+function odata_get_all(string $url, array $auth, $ttlSeconds = 300, bool $forceRefresh = false): array
 {
     $ttlSeconds = max(1, (int) $ttlSeconds);
     maybe_cleanup_expired_cache_files();
@@ -11,7 +11,7 @@ function odata_get_all(string $url, array $auth, $ttlSeconds = 300): array
     $cacheKey = build_cache_key($url, $auth);
     $cachePath = cache_path_for_key($cacheKey);
 
-    if (is_file($cachePath)) {
+    if (!$forceRefresh && is_file($cachePath)) {
         $cached = read_cache_payload($cachePath, $ttlSeconds);
         if ($cached['valid']) {
             return $cached['data'];
@@ -46,6 +46,8 @@ function odata_get_json(string $url, array $auth): array
     curl_setopt_array($ch, [
         CURLOPT_RETURNTRANSFER => true,
         CURLOPT_FOLLOWLOCATION => true,
+        CURLOPT_TIMEOUT => 0,
+        CURLOPT_CONNECTTIMEOUT => 60,
         CURLOPT_HTTPHEADER => [
             "Accept: application/json",
         ],
@@ -83,6 +85,61 @@ function odata_get_json(string $url, array $auth): array
     }
 
     return $json;
+}
+
+function odata_or_filter(string $field, array $values): string
+{
+    $parts = array_map(fn($v) => "$field eq '" . str_replace("'", "''", $v) . "'", $values);
+    return rawurlencode(implode(" or ", $parts));
+}
+
+function odata_fetch_by_or_filter(string $base, string $entity, string $select, string $field, array $values, array $auth, int $ttl, int $chunkSize = 60, bool $forceRefresh = false): array
+{
+    $values = array_values(array_unique(array_filter(array_map(fn($v) => (string) $v, $values), fn($v) => $v !== '')));
+    if (!$values) {
+        return [];
+    }
+
+    $rows = [];
+    foreach (array_chunk($values, $chunkSize) as $chunk) {
+        $filter = odata_or_filter($field, $chunk);
+        if ($filter === '') {
+            continue;
+        }
+        $url = $base . $entity . "?\$select={$select}&\$filter={$filter}&\$format=json";
+        $chunkRows = odata_get_all($url, $auth, $ttl, $forceRefresh);
+        if ($chunkRows) {
+            foreach ($chunkRows as $row) {
+                $rows[] = $row;
+            }
+        }
+    }
+
+    return $rows;
+}
+
+function odata_fetch_by_or_filter_safe(string $base, string $entity, string $select, string $field, array $values, array $auth, int $ttl, int $chunkSize = 40, bool $forceRefresh = false): array
+{
+    $values = array_values(array_unique(array_filter(array_map(fn($v) => (string) $v, $values), fn($v) => $v !== '')));
+    if (!$values) {
+        return [];
+    }
+
+    $rows = [];
+    foreach (array_chunk($values, $chunkSize) as $chunk) {
+        try {
+            $chunkRows = odata_fetch_by_or_filter($base, $entity, $select, $field, $chunk, $auth, $ttl, $chunkSize, $forceRefresh);
+            if ($chunkRows) {
+                foreach ($chunkRows as $row) {
+                    $rows[] = $row;
+                }
+            }
+        } catch (Exception $e) {
+            continue;
+        }
+    }
+
+    return $rows;
 }
 
 function build_cache_key(string $url, array $auth): string

@@ -3,6 +3,7 @@ require __DIR__ . "/odata.php";
 require __DIR__ . "/auth.php";
 require __DIR__ . "/logincheck.php";
 require __DIR__ . "/lib_expenses.php";
+require __DIR__ . "/lib_timesheet_store.php";
 
 $resourceNo = trim((string) ($_GET['resourceNo'] ?? $_POST['resourceNo'] ?? ''));
 $from = trim((string) ($_GET['from'] ?? $_POST['from'] ?? ''));
@@ -36,12 +37,13 @@ function formatDateNl(string $dateStr): string
     return $dt->format('d') . ' ' . $months[(int) $dt->format('n') - 1] . ' ' . $dt->format('Y');
 }
 
-$day = 3600 * 24;
-$escapedResourceNo = str_replace("'", "''", $resourceNo);
-$filterDecoded = "Ending_Date ge $from and Starting_Date le $to and Resource_No eq '$escapedResourceNo'";
-$filter = rawurlencode($filterDecoded);
-$tsUrl = $base . "Urenstaten?\$select=No,Starting_Date,Description,Resource_Name&\$filter={$filter}&\$format=json";
-$tsRows = odata_get_all($tsUrl, $auth, $day) ?? [];
+try {
+    $store = timesheet_store_db();
+} catch (Throwable $e) {
+    die('Lokale urenstaat-cache is niet beschikbaar.');
+}
+
+$tsRows = timesheet_store_get_timesheets_for_resource($store, $from, $to, $resourceNo);
 
 usort($tsRows, fn($a, $b) => strcmp((string) ($b['Starting_Date'] ?? ''), (string) ($a['Starting_Date'] ?? '')));
 

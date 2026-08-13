@@ -36,6 +36,7 @@ require __DIR__ . "/odata.php";
 require __DIR__ . "/auth.php";
 require __DIR__ . "/lib_times.php";
 require __DIR__ . "/lib_expenses.php";
+require __DIR__ . "/lib_timesheet_store.php";
 require __DIR__ . "/logincheck.php";
 
 $tsNo = trim((string) ($_GET['tsNo'] ?? ''));
@@ -48,24 +49,17 @@ $returnPerson = trim((string) ($_GET['returnPerson'] ?? ''));
 if ($tsNo === '' || $resourceNo === '')
     die("tsNo/resourceNo ontbreekt");
 
-// Header
-$tsFilter = rawurlencode("No eq '" . str_replace("'", "''", $tsNo) . "'");
-$tsUrl = $base . "Urenstaten?\$select=No,Starting_Date,Ending_Date,Description,Resource_Name&\$filter={$tsFilter}&\$format=json";
-$ts = (odata_get_all($tsUrl, $auth, 300)[0] ?? null);
+try {
+    $store = timesheet_store_db();
+} catch (Throwable $e) {
+    die("Lokale urenstaat-cache is niet beschikbaar.");
+}
+
+$ts = timesheet_store_get_timesheet($store, $tsNo);
 if (!$ts)
-    die("Urenstaat niet gevonden");
+    die("Urenstaat niet gevonden in de lokale cache. Deze wordt bijgewerkt via nightly.php rond 02:00.");
 
-
-// Lines voor ts + resource
-$filter = rawurlencode("Time_Sheet_No eq '" . str_replace("'", "''", $tsNo) . "'");
-$url = $base . "Urenstaatregels?\$select="
-    . "Time_Sheet_No,Line_No,Header_Resource_No,Header_Starting_Date,Header_Ending_Date,"
-    . "Type,Status,Description,Job_No,Job_Task_No,Cause_of_Absence_Code,Chargeable,Work_Type_Code,"
-    . "Service_Order_No,Assembly_Order_No,Archived,"
-    . "Field1,Field2,Field3,Field4,Field5,Field6,Field7,Total_Quantity" //monday, tuesday, wednesday, thursday, friday, saturday, sunday
-    . "&\$filter={$filter}&\$format=json";
-
-$linesAll = odata_get_all($url, $auth, 300);
+$linesAll = timesheet_store_get_lines_for_timesheet($store, $tsNo);
 
 //todo: fetch first starting date and last ending date
 
@@ -122,85 +116,59 @@ $backUrl = 'overzicht.php?from=' . rawurlencode($backFrom)
     . ($selectedApproverUserId !== '' ? '&approverUserId=' . rawurlencode($selectedApproverUserId) : '')
     . ($returnPerson !== '' ? '&returnPerson=' . rawurlencode($returnPerson) : '');
 
-try {
-    $weekNoFromDescription = 0;
-    $description = (string) ($ts['Description'] ?? '');
-    if (preg_match('/\bWeek\s*(\d+)\b/i', $description, $m)) {
-        $weekNoFromDescription = (int) ($m[1] ?? 0);
-    }
+$weekNoFromDescription = 0;
+$description = (string) ($ts['Description'] ?? '');
+if (preg_match('/\bWeek\s*(\d+)\b/i', $description, $m)) {
+    $weekNoFromDescription = (int) ($m[1] ?? 0);
+}
 
-    $startDateDt = new DateTimeImmutable((string) $startDate);
-    $isoWeekNo = (int) $startDateDt->format('W');
-    $isoYearNo = (int) $startDateDt->format('o');
+$startDateDt = new DateTimeImmutable((string) $startDate);
+$isoWeekNo = (int) $startDateDt->format('W');
+$isoYearNo = (int) $startDateDt->format('o');
 
-    $weekNoCandidates = [];
-    if ($weekNoFromDescription > 0) {
-        $weekNoCandidates[] = $weekNoFromDescription;
-    }
-    if (!in_array($isoWeekNo, $weekNoCandidates, true)) {
-        $weekNoCandidates[] = $isoWeekNo;
-    }
+$weekNoCandidates = [];
+if ($weekNoFromDescription > 0) {
+    $weekNoCandidates[] = $weekNoFromDescription;
+}
+if (!in_array($isoWeekNo, $weekNoCandidates, true)) {
+    $weekNoCandidates[] = $isoWeekNo;
+}
 
-    $cardRows = [];
-    foreach ($weekNoCandidates as $candidateWeekNo) {
-        $cardFilterDecoded = "Resource_No eq '" . str_replace("'", "''", $resourceNo) . "'"
-            . " and Week_No eq " . (int) $candidateWeekNo
-            . " and Year_No eq " . (int) $isoYearNo;
-        $cardFilter = rawurlencode($cardFilterDecoded);
-        $cardUrl = $base . "WebfleetHoursCard?\$select=Resource_No,Resource_Name,Week_No,Year_No,Status&\$filter={$cardFilter}&\$format=json";
-        $cardRows = odata_get_all($cardUrl, $auth, 300) ?? [];
-        if (!empty($cardRows)) {
-            break;
-        }
+$cardRows = [];
+foreach ($weekNoCandidates as $candidateWeekNo) {
+    $card = timesheet_store_get_webfleet_card($store, $resourceNo, (int) $candidateWeekNo, $isoYearNo);
+    if ($card) {
+        $cardRows = [$card];
+        break;
     }
+}
 
+$fetched = timesheet_store_get_webfleet_card_lines(
+    $store,
+    $resourceNo,
+    (string) $startDate,
+    (string) $endDate,
+    $allProjects
+);
+
+$unique = [];
+foreach ($fetched as $row) {
+    $key = (string) ($row['Job_Task_No'] ?? '')
+        . '|' . (string) ($row['KVT_Date_Webfleet_Activity'] ?? '')
+        . '|' . (string) ($row['KVT_Start_time_Webfleet_Act'] ?? '')
+        . '|' . (string) ($row['KVT_End_time_Webfleet_Act'] ?? '')
+        . '|' . (string) ($row['Work_Type_Code'] ?? '')
+        . '|' . (string) ($row['KVT_Calculated_Hours'] ?? '');
+    $unique[$key] = $row;
+}
+$webfleetLines = array_values($unique);
+
+if (!$webfleetLines) {
     if (empty($cardRows)) {
         $webfleetCardNotice = 'Webfleet via WebfleetHoursCard levert geen kaart op voor deze resource/week.';
     } else {
-        $dateFilter = "KVT_Date_Webfleet_Activity ge {$startDate} and KVT_Date_Webfleet_Activity le {$endDate}";
-        $resourceFilter = "No eq '" . str_replace("'", "''", (string) $resourceNo) . "'";
-        $entity = 'WebfleetHoursCardWebfleetHrsLines';
-        $select = 'Job_Task_No,KVT_Date_Webfleet_Activity,KVT_Start_time_Webfleet_Act,Quantity,KVT_End_time_Webfleet_Act,KVT_Pause,Work_Type_Code,KVT_Calculated_Hours';
-        $fetched = [];
-
-        if (!empty($allProjects)) {
-            foreach ($allProjects as $project) {
-                $projectEscaped = str_replace("'", "''", (string) $project);
-                $lineFilter = rawurlencode($dateFilter . " and " . $resourceFilter . " and Job_Task_No eq '" . $projectEscaped . "'");
-                $lineUrl = $base . $entity . "?\$select={$select}&\$filter={$lineFilter}&\$format=json";
-                $rows = odata_get_all($lineUrl, $auth, 300) ?? [];
-                foreach ($rows as $row) {
-                    $fetched[] = $row;
-                }
-            }
-        } else {
-            $lineFilter = rawurlencode($dateFilter . " and " . $resourceFilter);
-            $lineUrl = $base . $entity . "?\$select={$select}&\$filter={$lineFilter}&\$format=json";
-            $rows = odata_get_all($lineUrl, $auth, 300) ?? [];
-            foreach ($rows as $row) {
-                $fetched[] = $row;
-            }
-        }
-
-        $unique = [];
-        foreach ($fetched as $row) {
-            $key = (string) ($row['Job_Task_No'] ?? '')
-                . '|' . (string) ($row['KVT_Date_Webfleet_Activity'] ?? '')
-                . '|' . (string) ($row['KVT_Start_time_Webfleet_Act'] ?? '')
-                . '|' . (string) ($row['KVT_End_time_Webfleet_Act'] ?? '')
-                . '|' . (string) ($row['Work_Type_Code'] ?? '')
-                . '|' . (string) ($row['KVT_Calculated_Hours'] ?? '');
-            $unique[$key] = $row;
-        }
-        $webfleetLines = array_values($unique);
-
-        if (empty($webfleetLines)) {
-            $webfleetCardNotice = 'WebfleetHoursCard gevonden, maar geen bijbehorende regels in WebfleetHoursCardWebfleetHrsLines voor deze week.';
-        }
+        $webfleetCardNotice = 'WebfleetHoursCard gevonden, maar geen bijbehorende regels in WebfleetHoursCardWebfleetHrsLines voor deze week.';
     }
-} catch (Throwable $e) {
-    $webfleetLines = [];
-    $webfleetCardNotice = 'Webfleet via WebfleetHoursCard kon niet geladen worden: ' . $e->getMessage();
 }
 
 $holidays = holiday_set($year);

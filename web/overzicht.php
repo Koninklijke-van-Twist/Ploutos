@@ -36,10 +36,8 @@ require __DIR__ . "/odata.php";
 require __DIR__ . "/auth.php";
 require __DIR__ . "/lib_times.php";
 require __DIR__ . "/lib_expenses.php";
+require __DIR__ . "/lib_timesheet_store.php";
 require __DIR__ . "/logincheck.php";
-
-$hour = 3600;
-$day = $hour * 24;
 
 $month = trim((string) ($_GET['month'] ?? ''));
 $from = trim((string) ($_GET['from'] ?? ''));
@@ -119,6 +117,17 @@ function round_to_quarters(float $h): string
 function csv_decimal_quarters(float $h): string
 {
     return str_replace('.', ',', round_to_quarters($h));
+}
+
+function timesheet_status_class(string $status): string
+{
+    return match ($status) {
+        'Open' => 'openStatus',
+        'Submitted' => 'submittedStatus',
+        'Rejected' => 'rejectedStatus',
+        'Approved' => 'approvedStatus',
+        default => '',
+    };
 }
 
 function issue_filter_definitions(): array
@@ -585,10 +594,17 @@ function calculate_time_allowances_for_week(array $week, array $webfleetData): a
 }
 
 // Timesheets die overlappen: Ending_Date ge from AND Starting_Date le to
-$filterDecoded = "Ending_Date ge $from and Starting_Date le $to";
-$filter = rawurlencode($filterDecoded);
-$tsUrl = $base . "Urenstaten?\$select=No,Starting_Date,Ending_Date,Description,Resource_No,Resource_Name&\$filter={$filter}&\$format=json";
-$tsRows = odata_get_all($tsUrl, $auth, $day);
+try {
+    $store = timesheet_store_db();
+} catch (Throwable $e) {
+    die("Lokale urenstaat-cache is niet beschikbaar.");
+}
+
+if (!timesheet_store_has_any($store)) {
+    die("De lokale urenstaat-cache is nog niet gevuld. Dit gebeurt automatisch via nightly.php rond 02:00.");
+}
+
+$tsRows = timesheet_store_get_timesheets($store, $from, $to);
 
 if (!$tsRows)
     die("Geen urenstaten in dit tijdvak.");
@@ -609,48 +625,8 @@ if (!$tsNos)
 
 $expectedWeekStarts = week_starts_for_range($from, $to);
 
-// Helper OR filter
-function odata_or_filter(string $field, array $values): string
-{
-    $parts = array_map(fn($v) => "$field eq '" . str_replace("'", "''", $v) . "'", $values);
-    return rawurlencode(implode(" or ", $parts));
-}
-
-function odata_fetch_by_or_filter(string $base, string $entity, string $select, string $field, array $values, array $auth, int $ttl, int $chunkSize = 60): array
-{
-    $values = array_values(array_unique(array_filter(array_map(fn($v) => (string) $v, $values), fn($v) => $v !== '')));
-    if (!$values) {
-        return [];
-    }
-
-    $rows = [];
-    foreach (array_chunk($values, $chunkSize) as $chunk) {
-        $filter = odata_or_filter($field, $chunk);
-        if ($filter === '') {
-            continue;
-        }
-        $url = $base . $entity . "?\$select={$select}&\$filter={$filter}&\$format=json";
-        $chunkRows = odata_get_all($url, $auth, $ttl);
-        if ($chunkRows) {
-            foreach ($chunkRows as $row) {
-                $rows[] = $row;
-            }
-        }
-    }
-
-    return $rows;
-}
-
 // Lines voor alle timesheets
-$lines = odata_fetch_by_or_filter(
-    $base,
-    'Urenstaatregels',
-    'Time_Sheet_No,Status,Header_Resource_No,Work_Type_Code,Job_Task_No,Field1,Field2,Field3,Field4,Field5,Field6,Field7,Total_Quantity',
-    'Time_Sheet_No',
-    $tsNos,
-    $auth,
-    $day
-);
+$lines = timesheet_store_get_lines_for_timesheets($store, $tsNos);
 
 if (!$lines)
     die("Geen urenstaatregels in dit tijdvak.");
@@ -671,9 +647,7 @@ $needResNos = array_keys($needRes);
 // Resource lookup (naam, etc.)
 $resourcesByNo = [];
 if ($needResNos) {
-    foreach (odata_fetch_by_or_filter($base, 'AppResource', 'No,Name,Time_Sheet_Approver_User_ID', 'No', $needResNos, $auth, $day) as $r) {
-        $resourcesByNo[(string) $r['No']] = $r;
-    }
+    $resourcesByNo = timesheet_store_get_resources($store, $needResNos);
 }
 
 $approverUserIdOptions = [];
@@ -794,12 +768,43 @@ foreach ($lines as $l) {
     $byPerson[$personNo]['weeks'][$tsNo]['lines']++;
 }
 
-// Fetch webfleet data for each person
+$wfFrom = $from;
+$wfTo = $to;
+foreach ($tsByNo as $t) {
+    $sd = (string) ($t['Starting_Date'] ?? '');
+    $ed = (string) ($t['Ending_Date'] ?? '');
+    if ($sd !== '' && $sd < $wfFrom) {
+        $wfFrom = $sd;
+    }
+    if ($ed !== '' && $ed > $wfTo) {
+        $wfTo = $ed;
+    }
+}
+
+$allJobTaskNos = [];
+foreach ($lines as $l) {
+    if ((string) ($l['Status'] ?? '') !== 'Approved') {
+        continue;
+    }
+    $jobTaskNo = (string) ($l['Job_Task_No'] ?? '');
+    if ($jobTaskNo !== '') {
+        $allJobTaskNos[$jobTaskNo] = true;
+    }
+}
+$wfAll = timesheet_store_get_webfleet_hours($store, $wfFrom, $wfTo, array_keys($allJobTaskNos));
+$wfByTask = [];
+foreach ($wfAll as $wfLine) {
+    $taskNo = (string) ($wfLine['Job_Task_No'] ?? '');
+    if ($taskNo === '') {
+        continue;
+    }
+    $wfByTask[$taskNo][] = $wfLine;
+}
+
 foreach ($byPerson as $pKey => $person) {
     $allTsNos = array_keys($person['weeks']);
     $webfleetForPerson = [];
 
-    // Collect all Job_Task_No's for this person's timesheets
     $jobTaskNos = [];
     foreach ($lines as $l) {
         $linePersonNo = (string) ($l['Header_Resource_No'] ?? '');
@@ -807,35 +812,26 @@ foreach ($byPerson as $pKey => $person) {
         if ((string) ($l['Status'] ?? '') !== 'Approved') {
             continue;
         }
-        if ($linePersonNo === $person['personNo'] && in_array($lineTsNo, $allTsNos)) {
+        if ($linePersonNo === $person['personNo'] && in_array($lineTsNo, $allTsNos, true)) {
             $jobTaskNo = (string) ($l['Job_Task_No'] ?? '');
             if ($jobTaskNo !== '') {
                 $jobTaskNos[$jobTaskNo] = true;
             }
         }
     }
-    $jobTaskNos = array_keys($jobTaskNos);
 
-    // Fetch webfleet data for these job tasks
-    if (!empty($jobTaskNos)) {
-        foreach ($jobTaskNos as $jobTaskNo) {
-            $wfFilter = rawurlencode("Job_Task_No eq '" . str_replace("'", "''", $jobTaskNo) . "'");
-            $wfUrl = $base . "WebfleetHours?\$select=Job_Task_No,KVT_Date_Webfleet_Activity,KVT_Start_time_Webfleet_Act,KVT_End_time_Webfleet_Act,KVT_Pause,Work_Type_Code,KVT_Calculated_Hours&\$filter={$wfFilter}&\$format=json";
-            $wf = (odata_get_all($wfUrl, $auth, $day) ?? []);
-
-            foreach ($wf as $wfLine) {
-                // Filter by dates from all timesheets
-                foreach ($allTsNos as $tsNo) {
-                    if (!isset($tsByNo[$tsNo]))
-                        continue;
-                    $startDate = $tsByNo[$tsNo]['Starting_Date'];
-                    $endDate = $tsByNo[$tsNo]['Ending_Date'];
-
-                    $activityDate = (string) ($wfLine['KVT_Date_Webfleet_Activity'] ?? '');
-                    if ($activityDate >= $startDate && $activityDate <= $endDate) {
-                        $webfleetForPerson[] = $wfLine;
-                        break; // Don't add the same line multiple times
-                    }
+    foreach (array_keys($jobTaskNos) as $jobTaskNo) {
+        foreach ($wfByTask[$jobTaskNo] ?? [] as $wfLine) {
+            foreach ($allTsNos as $tsNo) {
+                if (!isset($tsByNo[$tsNo])) {
+                    continue;
+                }
+                $startDate = $tsByNo[$tsNo]['Starting_Date'];
+                $endDate = $tsByNo[$tsNo]['Ending_Date'];
+                $activityDate = (string) ($wfLine['KVT_Date_Webfleet_Activity'] ?? '');
+                if ($activityDate >= $startDate && $activityDate <= $endDate) {
+                    $webfleetForPerson[] = $wfLine;
+                    break;
                 }
             }
         }
@@ -925,6 +921,80 @@ foreach ($byPerson as &$p) {
     $p['weeks'] = $weeks;
 }
 unset($p);
+
+$leaveByPerson = [];
+foreach ($lines as $l) {
+    if (!timesheet_line_is_leave($l)) {
+        continue;
+    }
+
+    $tsNo = (string) ($l['Time_Sheet_No'] ?? '');
+    if ($tsNo === '' || !isset($tsByNo[$tsNo])) {
+        continue;
+    }
+
+    $personNo = (string) ($l['Header_Resource_No'] ?? '');
+    if ($personNo === '') {
+        continue;
+    }
+
+    $approverUserId = trim((string) ($resourcesByNo[$personNo]['Time_Sheet_Approver_User_ID'] ?? ''));
+    if ($selectedApproverUserId !== '' && $approverUserId !== $selectedApproverUserId) {
+        continue;
+    }
+
+    $name = (string) ($resourcesByNo[$personNo]['Name'] ?? $personNo);
+    $jobNo = trim((string) ($l['Job_No'] ?? ''));
+    $jobTaskNo = trim((string) ($l['Job_Task_No'] ?? ''));
+    $dayHours = [];
+    $dayTotal = 0.0;
+    for ($i = 1; $i <= 7; $i++) {
+        $hours = (float) ($l["Field{$i}"] ?? 0);
+        $dayHours[$i] = $hours;
+        $dayTotal += $hours;
+    }
+    $total = (float) ($l['Total_Quantity'] ?? $dayTotal);
+
+    if (!isset($leaveByPerson[$personNo])) {
+        $leaveByPerson[$personNo] = [
+            'personNo' => $personNo,
+            'name' => $name,
+            'lines' => [],
+        ];
+    }
+
+    $leaveCode = timesheet_line_leave_code($l);
+    $leaveLabels = timesheet_leave_codes();
+    $leaveKind = $leaveCode;
+    if ($leaveCode !== '' && isset($leaveLabels[$leaveCode])) {
+        $leaveKind = $leaveCode . ' — ' . $leaveLabels[$leaveCode];
+    }
+
+    $leaveByPerson[$personNo]['lines'][] = [
+        'lineLabel' => $tsNo . '-' . (int) ($l['Line_No'] ?? 0),
+        'description' => (string) ($l['Description'] ?? ''),
+        'workType' => $leaveKind,
+        'project' => $jobNo !== '' ? $jobNo : $jobTaskNo,
+        'status' => (string) ($l['Status'] ?? ''),
+        'weekNo' => timesheet_week_no_from_timesheet($tsByNo[$tsNo]),
+        'weekStart' => (string) ($tsByNo[$tsNo]['Starting_Date'] ?? ''),
+        'dayHours' => $dayHours,
+        'total' => $total,
+    ];
+}
+
+$leaveByPerson = array_values($leaveByPerson);
+usort($leaveByPerson, fn($a, $b) => strcmp($a['name'], $b['name']));
+foreach ($leaveByPerson as &$leavePerson) {
+    usort($leavePerson['lines'], function ($a, $b) {
+        $weekCmp = ((int) ($b['weekNo'] ?? 0)) <=> ((int) ($a['weekNo'] ?? 0));
+        if ($weekCmp !== 0) {
+            return $weekCmp;
+        }
+        return strcmp((string) ($a['lineLabel'] ?? ''), (string) ($b['lineLabel'] ?? ''));
+    });
+}
+unset($leavePerson);
 
 // Bouw een gegroepeerd overzicht van personen met missende of onjuiste urenstaten
 $issuesByApprover = [];
@@ -1368,6 +1438,52 @@ function hhmm(float|int $min): string
             background: #fff
         }
 
+        .zeroHours {
+            color: #c7d1e0;
+        }
+
+        .openStatus {
+            background-color: #ffa;
+            color: #770;
+        }
+
+        .submittedStatus {
+            background-color: #fa8;
+            color: #750;
+        }
+
+        .approvedStatus {
+            color: #070;
+        }
+
+        .rejectedStatus {
+            background-color: #f88;
+            color: #700;
+        }
+
+        #leaveOverview {
+            display: none;
+        }
+
+        body.leave-view #hoursOverview {
+            display: none;
+        }
+
+        body.leave-view #leaveOverview {
+            display: block;
+        }
+
+        @media print {
+            body.leave-view #hoursOverview {
+                display: block !important;
+            }
+
+            body.leave-view #leaveOverview,
+            #toggleLeaveBtn {
+                display: none !important;
+            }
+        }
+
         .warn-indicator {
             margin-left: 6px;
             cursor: help;
@@ -1701,7 +1817,9 @@ function hhmm(float|int $min): string
                     <?php endforeach; ?>
                 </select>
             </form>
+            <button type="button" class="btn" id="toggleLeaveBtn">Toon verlofregels</button>
         </noprint>
+        <div id="hoursOverview">
         <h1>Overzicht <?= formatDate(htmlspecialchars($from)) ?> t/m <?= formatDate(htmlspecialchars($to)) ?></h1>
         <noprint>
             <div class="muted">Klik op een week om details te bekijken.</div>
@@ -1935,6 +2053,68 @@ function hhmm(float|int $min): string
                 </table>
             </div>
         <?php endforeach; ?>
+        </div>
+
+        <noprint>
+            <div id="leaveOverview">
+                <h1>Verlof <?= formatDate(htmlspecialchars($from)) ?> t/m <?= formatDate(htmlspecialchars($to)) ?></h1>
+                <div class="muted">Alleen verlofregels van de geselecteerde periode.</div>
+                <?php if (!$leaveByPerson): ?>
+                    <div class="card">
+                        <p class="muted" style="margin:0;">Geen verlofregels gevonden in deze periode.</p>
+                    </div>
+                <?php endif; ?>
+                <?php foreach ($leaveByPerson as $leavePerson): ?>
+                    <div class="card">
+                        <h2><?= htmlspecialchars((string) ($leavePerson['name'] ?? '')) ?></h2>
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Regel</th>
+                                    <th>Naam</th>
+                                    <th>Verlofsoort</th>
+                                    <th>Project</th>
+                                    <th>Status</th>
+                                    <th>Weeknr</th>
+                                    <th>Ma</th>
+                                    <th>Di</th>
+                                    <th>Wo</th>
+                                    <th>Do</th>
+                                    <th>Vr</th>
+                                    <th>Za</th>
+                                    <th>Zo</th>
+                                    <th>Totaal</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <?php foreach ((array) ($leavePerson['lines'] ?? []) as $leaveLine): ?>
+                                    <tr>
+                                        <td><?= htmlspecialchars((string) ($leaveLine['lineLabel'] ?? '')) ?></td>
+                                        <td><?= htmlspecialchars((string) ($leaveLine['description'] ?? '')) ?></td>
+                                        <td><?= htmlspecialchars((string) ($leaveLine['workType'] ?? '')) ?></td>
+                                        <td><?= htmlspecialchars((string) ($leaveLine['project'] ?? '')) ?></td>
+                                        <?php $leaveStatus = (string) ($leaveLine['status'] ?? ''); ?>
+                                        <td class="<?= htmlspecialchars(timesheet_status_class($leaveStatus)) ?>">
+                                            <?= htmlspecialchars($leaveStatus) ?>
+                                        </td>
+                                        <td><?= (int) ($leaveLine['weekNo'] ?? 0) ?></td>
+                                        <?php for ($d = 1; $d <= 7; $d++): ?>
+                                            <?php $cellHours = (float) (($leaveLine['dayHours'][$d] ?? 0)); ?>
+                                            <td class="<?= hhmm($cellHours * 60) === '0:00' ? 'zeroHours' : '' ?>">
+                                                <?= htmlspecialchars(hhmm($cellHours * 60)) ?>
+                                            </td>
+                                        <?php endfor; ?>
+                                        <td>
+                                            <b><?= htmlspecialchars(hhmm(((float) ($leaveLine['total'] ?? 0)) * 60)) ?></b>
+                                        </td>
+                                    </tr>
+                                <?php endforeach; ?>
+                            </tbody>
+                        </table>
+                    </div>
+                <?php endforeach; ?>
+            </div>
+        </noprint>
     </div>
 
     <div id="pageLoader" class="page-loader" aria-live="polite" aria-busy="true">
@@ -1994,6 +2174,21 @@ function hhmm(float|int $min): string
                 approverForm.submit();
             });
         }
+
+        (function ()
+        {
+            const toggleBtn = document.getElementById('toggleLeaveBtn');
+            if (!toggleBtn)
+            {
+                return;
+            }
+            toggleBtn.addEventListener('click', function ()
+            {
+                const showingLeave = document.body.classList.toggle('leave-view');
+                toggleBtn.textContent = showingLeave ? 'Terug naar overzicht' : 'Toon verlofregels';
+                window.scrollTo(0, 0);
+            });
+        })();
 
         function setupIssueFilters ()
         {

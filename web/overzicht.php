@@ -970,29 +970,69 @@ foreach ($lines as $l) {
         $leaveKind = $leaveCode . ' — ' . $leaveLabels[$leaveCode];
     }
 
-    $leaveByPerson[$personNo]['lines'][] = [
-        'lineLabel' => $tsNo . '-' . (int) ($l['Line_No'] ?? 0),
-        'description' => (string) ($l['Description'] ?? ''),
-        'workType' => $leaveKind,
-        'project' => $jobNo !== '' ? $jobNo : $jobTaskNo,
-        'status' => (string) ($l['Status'] ?? ''),
-        'weekNo' => timesheet_week_no_from_timesheet($tsByNo[$tsNo]),
-        'weekStart' => (string) ($tsByNo[$tsNo]['Starting_Date'] ?? ''),
-        'dayHours' => $dayHours,
-        'total' => $total,
-    ];
+    $weekNo = timesheet_week_no_from_timesheet($tsByNo[$tsNo]);
+    $weekStart = (string) ($tsByNo[$tsNo]['Starting_Date'] ?? '');
+    $mergeKey = $weekNo . '|' . $weekStart . '|' . $leaveCode;
+    $project = $jobNo !== '' ? $jobNo : $jobTaskNo;
+    $description = trim((string) ($l['Description'] ?? ''));
+    $status = (string) ($l['Status'] ?? '');
+
+    if (!isset($leaveByPerson[$personNo]['lines'][$mergeKey])) {
+        $leaveByPerson[$personNo]['lines'][$mergeKey] = [
+            'description' => $description,
+            'descriptions' => $description !== '' ? [$description => true] : [],
+            'workType' => $leaveKind,
+            'project' => $project,
+            'projects' => $project !== '' ? [$project => true] : [],
+            'status' => $status,
+            'statuses' => $status !== '' ? [$status => true] : [],
+            'weekNo' => $weekNo,
+            'weekStart' => $weekStart,
+            'dayHours' => $dayHours,
+            'total' => $total,
+        ];
+        continue;
+    }
+
+    $merged = &$leaveByPerson[$personNo]['lines'][$mergeKey];
+    if ($description !== '') {
+        $merged['descriptions'][$description] = true;
+    }
+    if ($project !== '') {
+        $merged['projects'][$project] = true;
+    }
+    if ($status !== '') {
+        $merged['statuses'][$status] = true;
+    }
+    for ($i = 1; $i <= 7; $i++) {
+        $merged['dayHours'][$i] = (float) ($merged['dayHours'][$i] ?? 0) + (float) ($dayHours[$i] ?? 0);
+    }
+    $merged['total'] += $total;
+    unset($merged);
 }
 
 $leaveByPerson = array_values($leaveByPerson);
 usort($leaveByPerson, fn($a, $b) => strcmp($a['name'], $b['name']));
 foreach ($leaveByPerson as &$leavePerson) {
-    usort($leavePerson['lines'], function ($a, $b) {
+    $mergedLines = [];
+    foreach ((array) ($leavePerson['lines'] ?? []) as $merged) {
+        $descriptions = array_keys((array) ($merged['descriptions'] ?? []));
+        $projects = array_keys((array) ($merged['projects'] ?? []));
+        $statuses = array_keys((array) ($merged['statuses'] ?? []));
+        $merged['description'] = implode(' / ', $descriptions);
+        $merged['project'] = implode(' / ', $projects);
+        $merged['status'] = implode(' / ', $statuses);
+        unset($merged['descriptions'], $merged['projects'], $merged['statuses']);
+        $mergedLines[] = $merged;
+    }
+    usort($mergedLines, function ($a, $b) {
         $weekCmp = ((int) ($b['weekNo'] ?? 0)) <=> ((int) ($a['weekNo'] ?? 0));
         if ($weekCmp !== 0) {
             return $weekCmp;
         }
-        return strcmp((string) ($a['lineLabel'] ?? ''), (string) ($b['lineLabel'] ?? ''));
+        return strcmp((string) ($a['workType'] ?? ''), (string) ($b['workType'] ?? ''));
     });
+    $leavePerson['lines'] = $mergedLines;
 }
 unset($leavePerson);
 
@@ -2070,7 +2110,6 @@ function hhmm(float|int $min): string
                         <table>
                             <thead>
                                 <tr>
-                                    <th>Regel</th>
                                     <th>Naam</th>
                                     <th>Verlofsoort</th>
                                     <th>Project</th>
@@ -2089,7 +2128,6 @@ function hhmm(float|int $min): string
                             <tbody>
                                 <?php foreach ((array) ($leavePerson['lines'] ?? []) as $leaveLine): ?>
                                     <tr>
-                                        <td><?= htmlspecialchars((string) ($leaveLine['lineLabel'] ?? '')) ?></td>
                                         <td><?= htmlspecialchars((string) ($leaveLine['description'] ?? '')) ?></td>
                                         <td><?= htmlspecialchars((string) ($leaveLine['workType'] ?? '')) ?></td>
                                         <td><?= htmlspecialchars((string) ($leaveLine['project'] ?? '')) ?></td>

@@ -102,6 +102,28 @@ function split_premiums_for_day(float $hours, string $dateYmd): array
   return ['p285' => $p285, 'p47' => $p47, 'p85' => 0];
 }
 
+function hours_remaining_after_premiums(array $dayHours, array $dates): float
+{
+  $remaining = 0.0;
+  for ($d = 0; $d < 7; $d++) {
+    $hours = (float) ($dayHours[$d] ?? 0);
+    if ($hours <= 0) {
+      continue;
+    }
+    $date = (string) ($dates[$d] ?? '');
+    $split = $date !== ''
+      ? split_premiums_for_day($hours, $date)
+      : ['p285' => 0, 'p47' => 0, 'p85' => 0];
+    $premium = (
+      (float) ($split['p285'] ?? 0)
+      + (float) ($split['p47'] ?? 0)
+      + (float) ($split['p85'] ?? 0)
+    ) / 60.0;
+    $remaining += max(0, $hours - $premium);
+  }
+  return $remaining;
+}
+
 /**
  * Detecteert potentieel onjuist ingevulde uren op basis van regels:
  * - >24 uur geschreven op een dag

@@ -723,6 +723,8 @@ foreach ($lines as $l) {
             'expenses' => $expenseDefaults,
             'lines' => 0,
             'dayHours' => [0, 0, 0, 0, 0, 0, 0],
+            'normalHours' => 0.0,
+            'normalDayHours' => [0, 0, 0, 0, 0, 0, 0],
             'hasUnapproved' => false,
             'unapprovedCount' => 0,
             'validationLines' => [],
@@ -764,6 +766,18 @@ foreach ($lines as $l) {
     if (in_array($workType, $CODES_VERLET, true)) {
         $byPerson[$personNo]['weeks'][$tsNo]['verlet'] += (float) ($l['Total_Quantity'] ?? 0);
         continue;
+    }
+
+    if (!work_type_is_overtime($workType) && $workType !== 'KM') {
+        $normalHours = (float) ($byPerson[$personNo]['weeks'][$tsNo]['normalHours'] ?? 0);
+        $normalDayHours = $byPerson[$personNo]['weeks'][$tsNo]['normalDayHours'] ?? [0, 0, 0, 0, 0, 0, 0];
+        for ($i = 1; $i <= 7; $i++) {
+            $hours = (float) ($l["Field{$i}"] ?? 0);
+            $normalHours += $hours;
+            $normalDayHours[$i - 1] = ($normalDayHours[$i - 1] ?? 0) + $hours;
+        }
+        $byPerson[$personNo]['weeks'][$tsNo]['normalHours'] = $normalHours;
+        $byPerson[$personNo]['weeks'][$tsNo]['normalDayHours'] = $normalDayHours;
     }
 
     $byPerson[$personNo]['weeks'][$tsNo]['lines']++;
@@ -888,10 +902,15 @@ foreach ($byPerson as $personNo => &$person) {
     $contractHours = $contractHoursMap[$personNo] ?? contract_hours_default();
     $person['contractHours'] = $contractHours;
     foreach ($person['weeks'] as &$week) {
-        $normalHours = 0.0;
-        foreach ((array) ($week['dayHours'] ?? []) as $hours) {
-            $normalHours += (float) $hours;
+        $dates = [];
+        $weekStart = (string) ($week['weekStart'] ?? '');
+        for ($d = 0; $d < 7; $d++) {
+            $dates[$d] = $weekStart !== '' ? ymd_add_days($weekStart, $d) : '';
         }
+        $normalHours = hours_remaining_after_premiums(
+            (array) ($week['normalDayHours'] ?? [0, 0, 0, 0, 0, 0, 0]),
+            $dates
+        );
         $week['normalHours'] = $normalHours;
         $week['extraHours'] = extra_hours_above_contract($normalHours, $contractHours);
     }

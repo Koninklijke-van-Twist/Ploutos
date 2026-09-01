@@ -48,6 +48,11 @@ function extra_hours_above_contract(float $normalHours, float $contractHours): f
     return max(0, round($normalHours - $contractHours, 2));
 }
 
+function work_type_is_overtime(string $workType): bool
+{
+    return (bool) preg_match('/^(SOT|DOT)\d+/i', trim($workType));
+}
+
 function contract_hours_get_map(?SQLite3 $db, array $resourceNos = []): array
 {
     $map = [];

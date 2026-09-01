@@ -159,7 +159,7 @@ if ((string) ($_GET['action'] ?? '') === 'months') {
         <div class="page-loader-box">Bezig met laden…</div>
     </div>
     <div class="wrap">
-        <noprint><a href="feestdagen.php">Beheer Feestdagen</a></noprint>
+        <noprint><a href="feestdagen.php">Beheer Feestdagen</a> · <a href="contracturen.php">Beheer Contracturen</a></noprint>
         <h1>Overzicht genereren</h1>
         <p class="hint">Kies een maand, of geef een periode op.</p>
 

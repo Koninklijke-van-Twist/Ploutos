@@ -37,6 +37,7 @@ require __DIR__ . "/auth.php";
 require __DIR__ . "/lib_times.php";
 require __DIR__ . "/lib_expenses.php";
 require __DIR__ . "/lib_timesheet_store.php";
+require __DIR__ . "/lib_contract_hours.php";
 require __DIR__ . "/logincheck.php";
 
 $month = trim((string) ($_GET['month'] ?? ''));
@@ -882,6 +883,22 @@ foreach ($byPerson as $personNo => &$person) {
 }
 unset($person);
 
+$contractHoursMap = contract_hours_get_map(contract_hours_db(), array_keys($byPerson));
+foreach ($byPerson as $personNo => &$person) {
+    $contractHours = $contractHoursMap[$personNo] ?? contract_hours_default();
+    $person['contractHours'] = $contractHours;
+    foreach ($person['weeks'] as &$week) {
+        $normalHours = 0.0;
+        foreach ((array) ($week['dayHours'] ?? []) as $hours) {
+            $normalHours += (float) $hours;
+        }
+        $week['normalHours'] = $normalHours;
+        $week['extraHours'] = extra_hours_above_contract($normalHours, $contractHours);
+    }
+    unset($week);
+}
+unset($person);
+
 foreach ($byPerson as $personNo => &$person) {
     $presentWeekStarts = [];
     foreach ($person['weeks'] as $week) {
@@ -1215,6 +1232,7 @@ if ((string) ($_GET['export'] ?? '') === 'csv') {
         $tot009 = 0.0;
         $tot018 = 0.0;
         $tot030 = 0.0;
+        $totExtra = 0.0;
         $expenseTotals = [];
         foreach ($expenseColumns as $column) {
             $expenseKey = (string) ($column['key'] ?? '');
@@ -1232,6 +1250,7 @@ if ((string) ($_GET['export'] ?? '') === 'csv') {
             $tot009 += (float) ($allowances['allowance009'] ?? 0);
             $tot018 += (float) ($allowances['allowance018'] ?? 0);
             $tot030 += (float) ($allowances['allowance030'] ?? 0);
+            $totExtra += (float) ($w['extraHours'] ?? 0);
 
             $expenses = (array) ($w['expenses'] ?? []);
             $expenses["separation"] = $expenses["separation_gt_eu"] + $expenses["separation_lt_eu"];
@@ -1258,7 +1277,7 @@ if ((string) ($_GET['export'] ?? '') === 'csv') {
             csv_decimal_quarters($tot47 / 60),
             csv_decimal_quarters($tot85 / 60),
             '',
-            '',
+            csv_decimal_quarters($totExtra),
             csv_decimal_quarters($tot009),
             csv_decimal_quarters($tot018),
             csv_decimal_quarters($tot030),
@@ -1820,6 +1839,7 @@ function hhmm(float|int $min): string
             ]) ?>
             <a class="btn js-nav-loading" href="index.php">← Terug naar selectie</a>
             <a class="btn" href="feestdagen.php">Beheer Feestdagen</a>
+            <a class="btn" href="contracturen.php">Beheer Contracturen</a>
             <?php
             $exportUrl = 'overzicht.php?export=csv';
             if ($from !== '') {
@@ -1909,6 +1929,7 @@ function hhmm(float|int $min): string
                             <th>Weeknummer</th>
                             <th>#</th>
                             <th>Gewerkt</th>
+                            <th class="right">Extra uren</th>
                             <th class="right">28.5%</th>
                             <th></th>
                             <th class="right">47%</th>
@@ -1925,6 +1946,7 @@ function hhmm(float|int $min): string
                         $tot285 = 0;
                         $tot47 = 0;
                         $tot85 = 0;
+                        $totExtra = 0.0;
                         $totOnk = 0.0;
                         $totVer = 0.0;
                         ?>
@@ -1934,6 +1956,7 @@ function hhmm(float|int $min): string
                             $tot285 += (int) $w['p285'];
                             $tot47 += (int) $w['p47'];
                             $tot85 += (int) $w['p85'];
+                            $totExtra += (float) ($w['extraHours'] ?? 0);
                             $totOnk += (float) $w['onkosten'];
                             $totVer += (float) $w['verlet'];
 
@@ -1969,6 +1992,9 @@ function hhmm(float|int $min): string
                                 <td <?= hhmm($w['weekTotaal'] * 60) == "0:00" ? "class=\"zeroTotal\"" : "" ?>>
                                     <?= round_to_quarters($w['weekTotaal']) ?>
                                 </td>
+                                <td class="right <?= (($w['extraHours'] ?? 0) == 0) ? "zeroTotal" : "" ?>">
+                                    <?= htmlspecialchars(round_to_quarters((float) ($w['extraHours'] ?? 0))) ?>
+                                </td>
                                 <td class="right <?= $w['p285'] == 0 ? "zeroTotal" : "" ?>">
                                     <?= htmlspecialchars(round_to_quarters((int) $w['p285'] / 60)) ?>
                                 </td>
@@ -1993,6 +2019,9 @@ function hhmm(float|int $min): string
                     <tfoot>
                         <tr>
                             <td colspan="4">Totalen</td>
+                            <td class="right <?= $totExtra == 0 ? "zeroTotal" : "" ?>">
+                                <?= htmlspecialchars(round_to_quarters($totExtra)) ?>
+                            </td>
                             <td class="right <?= $tot285 == 0 ? "zeroTotal" : "" ?>">
                                 <?= htmlspecialchars(round_to_quarters($tot285 / 60)) ?>
                             </td>
@@ -2566,10 +2595,12 @@ function hhmm(float|int $min): string
             let hours285Cells = '';
             let hours47Cells = '';
             let hours85Cells = '';
+            let extraHoursCells = '';
             let allowance009Cells = '';
             let allowance018Cells = '';
             let allowance030Cells = '';
-            let total009 = 0, total018 = 0, total030 = 0;
+            let total009 = 0, total018 = 0, total030 = 0, totalExtra = 0;
+            let hasExtraHours = false;
             const expenseRows = {
                 coffee: { label: 'Koffievergoeding', cells: '', total: 0 },
                 lunch: { label: 'Lunchvergoeding', cells: '', total: 0 },
@@ -2588,6 +2619,14 @@ function hhmm(float|int $min): string
                 hours285Cells += `<td>${h285 > 0 ? round_to_quarters(h285) : ''}</td>`;
                 hours47Cells += `<td>${h47 > 0 ? round_to_quarters(h47) : ''}</td>`;
                 hours85Cells += `<td>${h85 > 0 ? round_to_quarters(h85) : ''}</td>`;
+
+                const extraHours = Number(week.extraHours || 0);
+                totalExtra += extraHours;
+                if (extraHours > 0.001)
+                {
+                    hasExtraHours = true;
+                }
+                extraHoursCells += `<td>${extraHours > 0.001 ? round_to_quarters(extraHours) : ''}</td>`;
 
                 // Use centrally calculated time-based allowances
                 const allowances = week.allowances || { allowance009: 0, allowance018: 0, allowance030: 0 };
@@ -2610,6 +2649,15 @@ function hhmm(float|int $min): string
             hours285Cells += `<td><strong>${round_to_quarters(total285.toFixed(2))}</strong></td>`;
             hours47Cells += `<td><strong>${round_to_quarters(total47.toFixed(2))}</strong></td>`;
             hours85Cells += `<td><strong>${round_to_quarters(total85.toFixed(2))}</strong></td>`;
+            extraHoursCells += `<td><strong>${totalExtra > 0.001 ? round_to_quarters(totalExtra) : ''}</strong></td>`;
+            const extraHoursSectionHtml = hasExtraHours ? `
+                        <tr class="section-header">
+                            <td colspan="${totalWeeks + 2}">Extra gemaakte uren boven norm</td>
+                        </tr>
+                        <tr>
+                            <td>Extra uren</td>
+                            ${extraHoursCells}
+                        </tr>` : '';
             allowance009Cells += `<td><strong>${total009 > 0 ? round_to_quarters(total009) : ''}</strong></td>`;
             allowance018Cells += `<td><strong>${total018 > 0 ? round_to_quarters(total018) : ''}</strong></td>`;
             allowance030Cells += `<td><strong>${total030 > 0 ? round_to_quarters(total030) : ''}</strong></td>`;
@@ -2685,6 +2733,7 @@ function hhmm(float|int $min): string
                             <td>0,30%: 00:00 - 06:00</td>
                             ${allowance030Cells}
                         </tr>
+                        ${extraHoursSectionHtml}
                         <tr class="section-close">
                             <td colspan="${totalWeeks + 2}"></td>
                         </tr>

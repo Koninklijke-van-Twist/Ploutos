@@ -582,6 +582,62 @@ function timesheet_store_get_resources(SQLite3 $db, array $resourceNos): array
     return $byNo;
 }
 
+function timesheet_store_list_people(SQLite3 $db): array
+{
+    $people = [];
+
+    $result = @$db->query('SELECT no, name FROM resources WHERE no IS NOT NULL AND no != \'\'');
+    if ($result) {
+        while ($row = $result->fetchArray(SQLITE3_ASSOC)) {
+            $no = trim((string) ($row['no'] ?? ''));
+            if ($no === '') {
+                continue;
+            }
+            $people[$no] = [
+                'No' => $no,
+                'Name' => trim((string) ($row['name'] ?? '')),
+            ];
+        }
+    }
+
+    $result = @$db->query('SELECT DISTINCT resource_no AS no, resource_name AS name FROM timesheets WHERE resource_no IS NOT NULL AND resource_no != \'\'');
+    if ($result) {
+        while ($row = $result->fetchArray(SQLITE3_ASSOC)) {
+            $no = trim((string) ($row['no'] ?? ''));
+            if ($no === '') {
+                continue;
+            }
+            $name = trim((string) ($row['name'] ?? ''));
+            if (!isset($people[$no])) {
+                $people[$no] = ['No' => $no, 'Name' => $name];
+            } elseif ($people[$no]['Name'] === '' && $name !== '') {
+                $people[$no]['Name'] = $name;
+            }
+        }
+    }
+
+    $result = @$db->query('SELECT DISTINCT header_resource_no AS no FROM lines WHERE header_resource_no IS NOT NULL AND header_resource_no != \'\'');
+    if ($result) {
+        while ($row = $result->fetchArray(SQLITE3_ASSOC)) {
+            $no = trim((string) ($row['no'] ?? ''));
+            if ($no === '' || isset($people[$no])) {
+                continue;
+            }
+            $people[$no] = ['No' => $no, 'Name' => ''];
+        }
+    }
+
+    $list = array_values($people);
+    usort($list, function ($a, $b) {
+        $nameCmp = strcasecmp((string) ($a['Name'] ?? ''), (string) ($b['Name'] ?? ''));
+        if ($nameCmp !== 0) {
+            return $nameCmp;
+        }
+        return strnatcasecmp((string) ($a['No'] ?? ''), (string) ($b['No'] ?? ''));
+    });
+    return $list;
+}
+
 function timesheet_store_all_resource_nos(SQLite3 $db): array
 {
     $nos = [];

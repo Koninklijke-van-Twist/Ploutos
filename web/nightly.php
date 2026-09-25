@@ -25,6 +25,16 @@ require __DIR__ . '/logincheck.php';
 require __DIR__ . '/lib_timesheet_store.php';
 require __DIR__ . '/lib_timesheet_sync.php';
 
+// Mímir: reads hebben geen BC-auth nodig. Leeg $base wordt één bedrijf uit companies.php.
+if (odata_mimir_enabled()) {
+    if (!isset($auth) || !is_array($auth)) {
+        $auth = [];
+    }
+    if (!isset($base) || !is_string($base) || trim($base) === '') {
+        $base = odata_mimir_company_base();
+    }
+}
+
 function nightly_log(string $message): void
 {
     echo '[' . date('Y-m-d H:i:s') . '] ' . $message . "\n";

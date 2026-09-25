@@ -664,7 +664,15 @@ if ($selectedApproverUserId !== '') {
 $approverUserIds = array_keys($approverUserIdOptions);
 sort($approverUserIds, SORT_NATURAL | SORT_FLAG_CASE);
 
-$companyName = company_name_from_base($base);
+$companyBase = (isset($base) && is_string($base)) ? $base : '';
+if ($companyBase === '' && function_exists('odata_mimir_enabled') && odata_mimir_enabled()) {
+    try {
+        $companyBase = odata_mimir_company_base();
+    } catch (Throwable $ignored) {
+        $companyBase = '';
+    }
+}
+$companyName = company_name_from_base($companyBase);
 $approverMailDomain = approver_mail_domain_for_company($companyName);
 
 $approverEmailsByUserId = [];

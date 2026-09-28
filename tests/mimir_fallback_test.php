@@ -128,8 +128,8 @@ $expectedEntityUrl = "https://bc.example:7148/Production/ODataV4/Company('KVT%20
 if (!is_array($entityCall) || $entityCall['url'] !== $expectedEntityUrl || $entityCall['user'] !== 'bcuser' || $entityCall['ttl'] !== 120) {
     fail('entity-fallback URL/auth/ttl klopt niet: ' . json_encode($entityCall));
 }
-if (fallback_count() < 2) {
-    fail('elke fallback moet gelogd worden, log=' . fallback_log());
+if (fallback_count() !== 1) {
+    fail('alleen de eerste Mímir-fout mag een fallback loggen, log=' . fallback_log());
 }
 $log = fallback_log();
 if (strpos($log, 'mimir_test_key_should_not_leak') !== false || strpos($log, 'bc-secret') !== false) {
@@ -257,6 +257,207 @@ if (fallback_count() !== $loggedBeforeDirect) {
 $directCall = $calls[count($calls) - 1] ?? null;
 if (($directRows[0]['No'] ?? '') !== 'WO-1' || !is_array($directCall) || $directCall['url'] !== $directOnlyUrl) {
     fail('lege $mimirApi moet de oude directe route ongewijzigd gebruiken: ' . json_encode($directCall));
+}
+
+odata_mimir_circuit_reset();
+$mimirApi = 'mimir_test_key_should_not_leak';
+$mimirBase = 'http://127.0.0.1:9';
+$baseUrl = 'https://bc.example:7148/';
+$environment = 'Production';
+$base = "https://bc.example:7148/Production/ODataV4/Company('KVT%20Gas')/";
+$auth = ['mode' => 'basic', 'user' => 'bcuser', 'pass' => 'bc-secret'];
+$sandboxAuth = ['mode' => 'basic', 'user' => 'sandbox-user', 'pass' => 'sandbox-secret'];
+$auth_list = [
+    'Production' => $auth,
+    'Sandbox' => $sandboxAuth,
+];
+$GLOBALS['odata_company_environment_map'] = ['Hunter van Twist' => 'Production'];
+
+$loggedBeforeSandbox = fallback_count();
+$beforeSandbox = count($calls);
+$sandboxUrl = "https://mimir.invalid/Sandbox/ODataV4/Company('Hunter%20van%20Twist')/AppResource?\$select=No";
+$sandboxRows = odata_get_all($sandboxUrl, $auth, 30);
+$sandboxCall = $calls[$beforeSandbox] ?? null;
+if (($sandboxRows[0]['No'] ?? '') !== 'WO-1' || !is_array($sandboxCall)) {
+    fail('tweede environment gaf geen stub-rij: ' . json_encode($sandboxCall));
+}
+if (strpos($sandboxCall['url'], 'https://bc.example:7148/Sandbox/ODataV4/Company(\'Hunter%20van%20Twist\')/AppResource?') !== 0) {
+    fail('URL-segment Sandbox moet de primaire environment winnen: ' . json_encode($sandboxCall));
+}
+if (strpos($sandboxCall['url'], '/Production/') !== false) {
+    fail('Sandbox-URL werd naar Production herschreven: ' . $sandboxCall['url']);
+}
+if ($sandboxCall['user'] !== 'sandbox-user') {
+    fail('Sandbox moet $auth_list[Sandbox] gebruiken, niet de primaire user: ' . json_encode($sandboxCall));
+}
+if (count($calls) !== $beforeSandbox + 1) {
+    fail('Sandbox-URL mag geen extra company-discovery doen: ' . json_encode(array_slice($calls, $beforeSandbox)));
+}
+if (fallback_count() !== $loggedBeforeSandbox + 1) {
+    fail('de eerste fout na een reset moet één keer gelogd worden');
+}
+$beforeOpen = count($calls);
+odata_get_all($sandboxUrl, $auth, 30);
+if (fallback_count() !== $loggedBeforeSandbox + 1) {
+    fail('een open circuit mag niet bij elke call opnieuw loggen, log=' . fallback_log());
+}
+$openCall = $calls[$beforeOpen] ?? null;
+if (!is_array($openCall) || $openCall['user'] !== 'sandbox-user' || strpos($openCall['url'], '/Sandbox/') === false) {
+    fail('open circuit moet dezelfde Sandbox-route houden: ' . json_encode($openCall));
+}
+
+$encodedEnv = odata_bc_url_from_odata_url("https://mimir.invalid/My%20Env/ODataV4/Company('X')/AppResource");
+if (strpos($encodedEnv, '/My%20Env/') === false || strpos($encodedEnv, 'My%2520Env') !== false) {
+    fail('environment-segment moet één keer geëncodeerd worden: ' . $encodedEnv);
+}
+if (strpos($encodedEnv, 'https://bc.example:7148/My%20Env/ODataV4/') !== 0) {
+    fail('herschreven environment-URL klopt niet: ' . $encodedEnv);
+}
+
+$GLOBALS['odata_company_environment_map']['Hunter van Twist'] = 'Sandbox';
+odata_mimir_circuit_reset();
+$beforeMapped = count($calls);
+$mappedRows = odata_mimir_query('Hunter van Twist', 'AppResource', ['$select' => 'No'], 30);
+$mappedCall = $calls[$beforeMapped] ?? null;
+if (($mappedRows[0]['No'] ?? '') !== 'WO-1' || !is_array($mappedCall)) {
+    fail('query via company-map gaf geen stub-rij: ' . json_encode($mappedCall));
+}
+if (strpos($mappedCall['url'], "https://bc.example:7148/Sandbox/ODataV4/Company('Hunter%20van%20Twist')/AppResource?") !== 0) {
+    fail('onbekend URL-segment moet de company→environment-map gebruiken: ' . json_encode($mappedCall));
+}
+if ($mappedCall['user'] !== 'sandbox-user') {
+    fail('company-map moet de Sandbox-credentials kiezen: ' . json_encode($mappedCall));
+}
+if (count($calls) !== $beforeMapped + 1) {
+    fail('bekende company-map mag niet opnieuw discovery doen: ' . json_encode(array_slice($calls, $beforeMapped)));
+}
+
+$environment = 'mimir';
+$cacheKey = build_cache_key($sandboxUrl, $sandboxAuth);
+if (substr($cacheKey, -strlen('|sandbox-user|Sandbox')) !== '|sandbox-user|Sandbox') {
+    fail('cache-key moet de echte BC-environment gebruiken: ' . $cacheKey);
+}
+if (strpos($cacheKey, '|mimir') !== false) {
+    fail('cache-key mag de placeholder mimir niet gebruiken: ' . $cacheKey);
+}
+$mimirSegmentKey = build_cache_key(
+    "https://mimir.invalid/mimir/ODataV4/Company('Hunter%20van%20Twist')/AppResource",
+    $sandboxAuth
+);
+if (substr($mimirSegmentKey, -strlen('|Sandbox')) !== '|Sandbox' || strpos($mimirSegmentKey, '|mimir') !== false) {
+    fail('cache-key moet mimir-segment negeren en de company-map gebruiken: ' . $mimirSegmentKey);
+}
+$environment = 'Production';
+
+odata_mimir_circuit_reset();
+$beforeCompanies = count($calls);
+$companyRows = odata_direct_companies_as_rows('Sandbox');
+$companyCall = $calls[$beforeCompanies] ?? null;
+if (!is_array($companyCall) || strpos($companyCall['url'], 'https://bc.example:7148/Sandbox/ODataV4/Company') !== 0) {
+    fail('company-lijst met filter moet die environment gebruiken: ' . json_encode($companyCall));
+}
+if ($companyCall['user'] !== 'sandbox-user') {
+    fail('gefilterde company-lijst moet $auth_list[Sandbox] gebruiken: ' . json_encode($companyCall));
+}
+if (count($calls) !== $beforeCompanies + 1) {
+    fail('environment-filter mag alleen die environment ophalen: ' . json_encode(array_slice($calls, $beforeCompanies)));
+}
+$sawHunter = false;
+foreach ($companyRows as $companyRow) {
+    if (($companyRow['Name'] ?? '') === 'Hunter van Twist' && ($companyRow['environment'] ?? '') === 'Sandbox') {
+        $sawHunter = true;
+    }
+}
+if (!$sawHunter) {
+    fail('company-rijen moeten de opgevraagde environment bewaren: ' . json_encode($companyRows));
+}
+
+odata_mimir_circuit_reset();
+$loggedBeforeCaller = fallback_count();
+$callsBeforeCaller = count($calls);
+$callerThrown = null;
+try {
+    odata_mimir_or_direct(
+        static function (): array {
+            throw new Exception('geen Mímir-storing');
+        },
+        static function (): array {
+            return [['No' => 'should-not-run']];
+        }
+    );
+    fail('een exception van de caller moet blijven doorgaan');
+} catch (Throwable $exception) {
+    $callerThrown = $exception;
+}
+if (!$callerThrown instanceof Throwable || $callerThrown->getMessage() !== 'geen Mímir-storing') {
+    $callerMessage = $callerThrown instanceof Throwable ? $callerThrown->getMessage() : 'geen exception';
+    fail('caller-exception werd vervangen of geslikt: ' . $callerMessage);
+}
+if (odata_mimir_circuit_open()) {
+    fail('een caller-exception mag het circuit niet openen');
+}
+if (fallback_count() !== $loggedBeforeCaller) {
+    fail('een caller-exception mag geen fallback loggen');
+}
+if (count($calls) !== $callsBeforeCaller) {
+    fail('een caller-exception mag de directe route niet starten');
+}
+
+$authFile = tempnam(sys_get_temp_dir(), 'ploutos-auth-');
+if ($authFile === false) {
+    fail('tijdelijk auth-bestand kon niet worden gemaakt');
+}
+file_put_contents(
+    $authFile,
+    "<?php\n"
+    . "\$baseUrl = 'https://from-file.example:7148/';\n"
+    . "\$base = \"https://from-file.example:7148/Sandbox/ODataV4/Company('File%20Co')/\";\n"
+    . "\$environment = 'Sandbox';\n"
+    . "\$auth = ['mode' => 'basic', 'user' => 'file-user', 'pass' => 'file-secret'];\n"
+    . "\$auth_list = ['Sandbox' => \$auth];\n"
+    . "\$mimirApi = 'file-key-should-not-stick';\n"
+);
+$GLOBALS['PLOUTOS_AUTH_PHP_PATH'] = $authFile;
+$GLOBALS['baseUrl'] = 'https://preset.example/';
+$GLOBALS['environment'] = 'keep-me';
+$GLOBALS['mimirApi'] = 'already-set-key';
+unset($GLOBALS['auth'], $GLOBALS['auth_list'], $GLOBALS['base']);
+odata_load_auth_for_fallback();
+@unlink($authFile);
+unset($GLOBALS['PLOUTOS_AUTH_PHP_PATH']);
+if (($GLOBALS['baseUrl'] ?? '') !== 'https://preset.example/') {
+    fail('gezette baseUrl werd overschreven: ' . (string) ($GLOBALS['baseUrl'] ?? ''));
+}
+if (($GLOBALS['environment'] ?? '') !== 'keep-me') {
+    fail('gezette environment werd overschreven: ' . (string) ($GLOBALS['environment'] ?? ''));
+}
+if (($GLOBALS['mimirApi'] ?? '') !== 'already-set-key') {
+    fail('auth.php mag $mimirApi niet via de fallback-loader zetten');
+}
+$loadedAuth = $GLOBALS['auth'] ?? null;
+if (!is_array($loadedAuth) || ($loadedAuth['user'] ?? '') !== 'file-user' || ($loadedAuth['pass'] ?? '') !== 'file-secret') {
+    fail('ontbrekende $auth moet uit auth.php naar $GLOBALS gekopieerd worden: ' . json_encode($loadedAuth));
+}
+$loadedList = $GLOBALS['auth_list'] ?? null;
+$loadedSandbox = is_array($loadedList) ? ($loadedList['Sandbox']['user'] ?? '') : '';
+if ($loadedSandbox !== 'file-user') {
+    fail('ontbrekende $auth_list moet uit auth.php naar $GLOBALS gekopieerd worden: ' . json_encode($loadedList));
+}
+$loadedBase = (string) ($GLOBALS['base'] ?? '');
+if (strpos($loadedBase, 'https://from-file.example:7148/Sandbox/ODataV4/Company(') !== 0) {
+    fail('ontbrekende $base moet uit auth.php naar $GLOBALS gekopieerd worden: ' . $loadedBase);
+}
+odata_load_auth_for_fallback();
+if (($GLOBALS['baseUrl'] ?? '') !== 'https://preset.example/' || ($GLOBALS['environment'] ?? '') !== 'keep-me') {
+    fail('een tweede load mag gezette waarden alsnog niet overschrijven');
+}
+
+$log = fallback_log();
+if (strpos($log, 'sandbox-secret') !== false || strpos($log, 'file-secret') !== false || strpos($log, 'bc-secret') !== false) {
+    fail('log bevat een geheim');
+}
+if (strpos($log, 'mimir_test_key_should_not_leak') !== false || strpos($log, 'file-key-should-not-stick') !== false) {
+    fail('log bevat een API-sleutel');
 }
 
 echo "OK\n";

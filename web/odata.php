@@ -382,6 +382,35 @@ function odata_bc_auth_for_environment(?string $env): ?array
     return null;
 }
 
+function odata_bc_auth_list_missing_or_empty(): bool
+{
+    global $auth_list;
+    if (!isset($auth_list) || !is_array($auth_list)) {
+        return true;
+    }
+    return $auth_list === [];
+}
+
+/**
+ * Credentials voor een directe BC-call naar $env.
+ * Een eigen bruikbare auth_list-entry wint. Zonder lijst, of op de primaire
+ * environment, vallen we terug op $auth of meegegeven credentials. Alleen een
+ * andere environment bij een gevulde lijst zonder eigen entry levert null.
+ */
+function odata_bc_auth_for_direct_environment(?string $env, array $passed): ?array
+{
+    $listed = odata_bc_auth_for_environment($env);
+    if ($listed !== null) {
+        return $listed;
+    }
+    $primary = odata_bc_environment();
+    $isPrimary = $env !== null && $primary !== null && strcasecmp($primary, $env) === 0;
+    if ($isPrimary || odata_bc_auth_list_missing_or_empty()) {
+        return odata_bc_auth_for_fallback($passed);
+    }
+    return null;
+}
+
 function odata_bc_base_url(): ?string
 {
     global $baseUrl;
@@ -609,13 +638,7 @@ function odata_bc_prepare_direct_call(string $url, array $passed): array
         $env = odata_bc_environment();
     }
     if ($known) {
-        $auth = odata_bc_auth_for_environment($env);
-        if ($auth === null) {
-            $primary = odata_bc_environment();
-            if ($primary !== null && strcasecmp($primary, (string) $env) === 0) {
-                $auth = odata_bc_auth_for_fallback($passed);
-            }
-        }
+        $auth = odata_bc_auth_for_direct_environment($env, $passed);
         if ($auth === null) {
             $auth = [];
         }
@@ -844,13 +867,7 @@ function odata_direct_companies_as_rows(?string $environmentFilter = null): arra
 
     $out = [];
     foreach ($envs as $env) {
-        $auth = odata_bc_auth_for_environment($env);
-        if ($auth === null) {
-            $primary = odata_bc_environment();
-            if ($primary !== null && strcasecmp($primary, $env) === 0) {
-                $auth = odata_bc_auth_for_fallback([]);
-            }
-        }
+        $auth = odata_bc_auth_for_direct_environment($env, []);
         if ($auth === null) {
             continue;
         }
@@ -1035,13 +1052,7 @@ function odata_direct_query(string $company, string $table, array $odataQuery, i
     }
     $base = odata_bc_base_url();
     if ($known) {
-        $auth = odata_bc_auth_for_environment($env);
-        if ($auth === null) {
-            $primary = odata_bc_environment();
-            if ($primary !== null && strcasecmp($primary, (string) $env) === 0) {
-                $auth = odata_bc_auth_for_fallback([]);
-            }
-        }
+        $auth = odata_bc_auth_for_direct_environment($env, []);
     } else {
         $auth = odata_bc_auth_for_fallback([]);
     }
@@ -1188,6 +1199,13 @@ function odata_get_all(string $url, array $auth, $ttlSeconds = 300, bool $forceR
             },
             static function () use ($url, $auth, $ttlSeconds, $forceRefresh): array {
                 $prepared = odata_bc_prepare_direct_call($url, $auth);
+                if ($prepared['auth'] === []) {
+                    $previous = odata_mimir_last_error();
+                    if ($previous instanceof Throwable) {
+                        throw $previous;
+                    }
+                    throw new Exception('Mímir mislukt.');
+                }
                 return odata_get_all_direct($prepared['url'], $prepared['auth'], $ttlSeconds, $forceRefresh);
             }
         );

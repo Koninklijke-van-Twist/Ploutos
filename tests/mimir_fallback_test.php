@@ -436,8 +436,11 @@ $otherAuthRows = odata_get_all(
     30
 );
 $otherAuthCall = $calls[$beforeOtherAuth] ?? null;
-if (($otherAuthRows[0]['No'] ?? '') !== 'WO-1' || !is_array($otherAuthCall) || $otherAuthCall['user'] !== '') {
-    fail('andere environment zonder auth_list-entry mag de primaire credentials niet lenen: ' . json_encode($otherAuthCall));
+if (($otherAuthRows[0]['No'] ?? '') !== 'WO-1' || !is_array($otherAuthCall) || $otherAuthCall['user'] !== 'sync-user') {
+    fail('lege auth_list moet meegegeven credentials gebruiken voor een andere environment: ' . json_encode($otherAuthCall));
+}
+if (strpos((string) ($otherAuthCall['url'] ?? ''), '/Sandbox/') === false) {
+    fail('lege auth_list moet de Sandbox-URL houden: ' . json_encode($otherAuthCall));
 }
 odata_mimir_circuit_reset();
 $beforePrimaryQuery = count($calls);
@@ -448,19 +451,113 @@ if (($primaryQueryRows[0]['No'] ?? '') !== 'WO-1' || !is_array($primaryQueryCall
 }
 odata_mimir_circuit_reset();
 $beforeSandboxQuery = count($calls);
-$sandboxQueryThrown = null;
+$sandboxQueryRows = odata_mimir_query('Hunter van Twist', 'AppResource', ['$select' => 'No'], 30);
+$sandboxQueryCall = $calls[$beforeSandboxQuery] ?? null;
+if (($sandboxQueryRows[0]['No'] ?? '') !== 'WO-1' || !is_array($sandboxQueryCall) || $sandboxQueryCall['user'] !== 'bcuser') {
+    fail('query op een andere environment moet $auth gebruiken als auth_list leeg is: ' . json_encode($sandboxQueryCall));
+}
+if (strpos((string) ($sandboxQueryCall['url'] ?? ''), '/Sandbox/') === false) {
+    fail('lege auth_list moet de company-environment houden: ' . json_encode($sandboxQueryCall));
+}
+
+odata_mimir_circuit_reset();
+$mimirApi = 'mimir_test_key_should_not_leak';
+$mimirBase = 'http://127.0.0.1:9';
+$baseUrl = 'https://bc.example:7148/';
+$environment = 'Production';
+$base = "https://bc.example:7148/Production/ODataV4/Company('KVT%20Gas')/";
+$auth = ['mode' => 'basic', 'user' => 'bcuser', 'pass' => 'bc-secret'];
+unset($auth_list, $GLOBALS['auth_list']);
+unset($GLOBALS['odata_company_environment_map']);
+$beforeOnlyAuthCompanies = count($calls);
+$onlyAuthNames = odata_mimir_list_companies(null);
+$onlyAuthCompanyCall = $calls[$beforeOnlyAuthCompanies] ?? null;
+if (
+    $onlyAuthNames === []
+    || !is_array($onlyAuthCompanyCall)
+    || $onlyAuthCompanyCall['user'] !== 'bcuser'
+    || strpos($onlyAuthCompanyCall['url'], 'https://bc.example:7148/Production/ODataV4/Company') !== 0
+) {
+    fail('companylijst zonder auth_list moet de primaire environment met $auth bevragen: ' . json_encode($onlyAuthCompanyCall));
+}
+odata_mimir_circuit_reset();
+$beforeOnlyAuthQuery = count($calls);
+$onlyAuthQueryRows = odata_mimir_query('KVT Gas', 'AppResource', ['$select' => 'No'], 30);
+$onlyAuthQueryCall = null;
+foreach (array_slice($calls, $beforeOnlyAuthQuery) as $onlyAuthCandidate) {
+    if (strpos($onlyAuthCandidate['url'], '/AppResource?') !== false) {
+        $onlyAuthQueryCall = $onlyAuthCandidate;
+    }
+}
+if (($onlyAuthQueryRows[0]['No'] ?? '') !== 'WO-1' || !is_array($onlyAuthQueryCall) || $onlyAuthQueryCall['user'] !== 'bcuser') {
+    fail('query zonder auth_list moet $auth gebruiken: ' . json_encode($onlyAuthQueryCall));
+}
+odata_mimir_circuit_reset();
+$beforeOnlyAuthFetch = count($calls);
+$onlyAuthFetchRows = odata_mimir_fetch_all(
+    "https://mimir.invalid/Sandbox/ODataV4/Company('Hunter%20van%20Twist')/AppResource?\$select=No",
+    30
+);
+$onlyAuthFetchCall = $calls[$beforeOnlyAuthFetch] ?? null;
+if (($onlyAuthFetchRows[0]['No'] ?? '') !== 'WO-1' || !is_array($onlyAuthFetchCall) || $onlyAuthFetchCall['user'] !== 'bcuser') {
+    fail('URL-fetch zonder auth_list moet $auth gebruiken: ' . json_encode($onlyAuthFetchCall));
+}
+if (strpos((string) ($onlyAuthFetchCall['url'] ?? ''), 'https://bc.example:7148/Sandbox/ODataV4/') !== 0) {
+    fail('URL-fetch zonder auth_list moet de environment in de URL houden: ' . json_encode($onlyAuthFetchCall));
+}
+$beforeSandboxCompanies = count($calls);
+$sandboxOnlyRows = odata_direct_companies_as_rows('Sandbox');
+$sandboxOnlyCall = $calls[$beforeSandboxCompanies] ?? null;
+if (
+    $sandboxOnlyRows === []
+    || !is_array($sandboxOnlyCall)
+    || $sandboxOnlyCall['user'] !== 'bcuser'
+    || strpos($sandboxOnlyCall['url'], 'https://bc.example:7148/Sandbox/ODataV4/Company') !== 0
+) {
+    fail('companylijst van een andere environment zonder auth_list moet $auth gebruiken: ' . json_encode($sandboxOnlyCall));
+}
+
+odata_mimir_circuit_reset();
+$sandboxAuth = ['mode' => 'basic', 'user' => 'sandbox-user', 'pass' => 'sandbox-secret'];
+$auth_list = ['Sandbox' => $sandboxAuth];
+$environment = 'Production';
+$GLOBALS['odata_company_environment_map'] = [];
+$beforeUnmapped = count($calls);
+$unmappedRows = odata_mimir_query('Onbekend Bedrijf', 'AppResource', ['$select' => 'No'], 30);
+$unmappedCall = null;
+foreach (array_slice($calls, $beforeUnmapped) as $unmappedCandidate) {
+    if (strpos($unmappedCandidate['url'], 'Onbekend') !== false) {
+        $unmappedCall = $unmappedCandidate;
+    }
+}
+if (($unmappedRows[0]['No'] ?? '') !== 'WO-1' || !is_array($unmappedCall) || $unmappedCall['user'] !== 'bcuser') {
+    fail('onbekend bedrijf moet via $auth naar de primaire environment: ' . json_encode($unmappedCall));
+}
+if (strpos((string) ($unmappedCall['url'] ?? ''), '/Production/') === false) {
+    fail('onbekend bedrijf moet de primaire environment gebruiken: ' . json_encode($unmappedCall));
+}
+
+odata_mimir_circuit_reset();
+$auth_list = ['Production' => $auth];
+$GLOBALS['odata_company_environment_map'] = ['Hunter van Twist' => 'Sandbox'];
+$beforeRefuse = count($calls);
+$refuseThrown = null;
 try {
-    odata_mimir_query('Hunter van Twist', 'AppResource', ['$select' => 'No'], 30);
-    fail('query op een andere environment zonder auth_list-entry moet de Mímir-fout teruggeven');
+    odata_get_all(
+        "https://mimir.invalid/Sandbox/ODataV4/Company('Hunter%20van%20Twist')/AppResource?\$select=No",
+        $auth,
+        30
+    );
+    fail('Sandbox-URL zonder auth_list-entry moet de Mímir-fout teruggeven');
 } catch (Throwable $exception) {
-    $sandboxQueryThrown = $exception;
+    $refuseThrown = $exception;
 }
-if (!$sandboxQueryThrown instanceof Throwable || strpos($sandboxQueryThrown->getMessage(), 'Mímir') === false) {
-    $sandboxQueryMessage = $sandboxQueryThrown instanceof Throwable ? $sandboxQueryThrown->getMessage() : 'geen exception';
-    fail('verwachte Mímir-fout bij ontbrekende Sandbox-credentials: ' . $sandboxQueryMessage);
+if (!$refuseThrown instanceof Throwable || strpos($refuseThrown->getMessage(), 'Mímir') === false) {
+    $refuseMessage = $refuseThrown instanceof Throwable ? $refuseThrown->getMessage() : 'geen exception';
+    fail('verwachte Mímir-fout bij Sandbox-URL zonder entry: ' . $refuseMessage);
 }
-if (count($calls) !== $beforeSandboxQuery) {
-    fail('ontbrekende Sandbox-credentials mogen geen BC-call met andere credentials doen: ' . json_encode(array_slice($calls, $beforeSandboxQuery)));
+if (count($calls) !== $beforeRefuse) {
+    fail('Sandbox-URL zonder auth_list-entry mag geen BC-call doen: ' . json_encode(array_slice($calls, $beforeRefuse)));
 }
 
 $authFile = tempnam(sys_get_temp_dir(), 'ploutos-auth-');

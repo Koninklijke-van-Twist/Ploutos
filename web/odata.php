@@ -611,6 +611,12 @@ function odata_bc_prepare_direct_call(string $url, array $passed): array
     if ($known) {
         $auth = odata_bc_auth_for_environment($env);
         if ($auth === null) {
+            $primary = odata_bc_environment();
+            if ($primary !== null && strcasecmp($primary, (string) $env) === 0) {
+                $auth = odata_bc_auth_for_fallback($passed);
+            }
+        }
+        if ($auth === null) {
             $auth = [];
         }
     } else {
@@ -1030,6 +1036,12 @@ function odata_direct_query(string $company, string $table, array $odataQuery, i
     $base = odata_bc_base_url();
     if ($known) {
         $auth = odata_bc_auth_for_environment($env);
+        if ($auth === null) {
+            $primary = odata_bc_environment();
+            if ($primary !== null && strcasecmp($primary, (string) $env) === 0) {
+                $auth = odata_bc_auth_for_fallback([]);
+            }
+        }
     } else {
         $auth = odata_bc_auth_for_fallback([]);
     }

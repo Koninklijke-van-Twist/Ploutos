@@ -325,6 +325,10 @@ try {
     test_assert('Mímir-client user-agent', $sawMimirUa);
     test_assert('Mímir-key in Authorization en X-API-Key', $sawKey);
 
+    // De 302 is een bewuste foutprobe. Zonder reset slaat de circuit breaker
+    // de hierop volgende geslaagde Mímir-calls over.
+    odata_mimir_circuit_reset();
+
     @unlink($mockLog);
     $mimirBase = 'http://127.0.0.1:' . $mockPort . '/mimir-one/api';
     unset($GLOBALS['base']);

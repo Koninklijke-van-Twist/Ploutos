@@ -664,6 +664,7 @@ if ($selectedApproverUserId !== '') {
 $approverUserIds = array_keys($approverUserIdOptions);
 sort($approverUserIds, SORT_NATURAL | SORT_FLAG_CASE);
 
+// Leeg $base: bedrijfsnaam via Mímir, anders via de directe BC-fallback.
 $companyBase = (isset($base) && is_string($base)) ? $base : '';
 if ($companyBase === '' && function_exists('odata_mimir_enabled') && odata_mimir_enabled()) {
     try {

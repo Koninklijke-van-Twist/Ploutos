@@ -4,9 +4,10 @@
 // $mimirApi  = 'mimir_…';              // verplicht om Mímir te activeren
 // $mimirBase = 'https://sleutels.kvt.nl/mimir/api'; // optioneel
 //
-// Bij Mímir zijn $auth_list, $environment en $auth niet nodig voor reads.
-// $base is optioneel: een Company-pad zonder BC-host volstaat als er meerdere
-// bedrijven zijn. Bij precies één bedrijf vult Ploutos $base zelf.
+// Met $mimirApi gaan reads eerst naar Mímir. Faalt die, dan valt Ploutos terug
+// op het BC-pad hieronder. Laat $auth_list, $environment, $auth en de volledige
+// $base (BC-host + company) daarom naast $mimirApi staan. Een Company-pad
+// zonder host is niet genoeg voor die fallback.
 // $base = "/ODataV4/Company('COMPANY')/";
 
 $auth_list =

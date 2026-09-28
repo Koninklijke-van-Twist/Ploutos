@@ -25,7 +25,8 @@ require __DIR__ . '/logincheck.php';
 require __DIR__ . '/lib_timesheet_store.php';
 require __DIR__ . '/lib_timesheet_sync.php';
 
-// Mímir: reads hebben geen BC-auth nodig. Leeg $base wordt één bedrijf uit companies.php.
+// Mímir eerst. $base / $auth / $auth_list / $environment uit auth.php blijven
+// beschikbaar: bij een Mímir-storing (web én CLI/cron) valt de fetch terug op BC.
 if (odata_mimir_enabled()) {
     if (!isset($auth) || !is_array($auth)) {
         $auth = [];

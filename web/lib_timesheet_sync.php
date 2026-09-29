@@ -2,8 +2,9 @@
 
 function timesheet_sync_line_select(): string
 {
-    return 'Time_Sheet_No,Line_No,Header_Resource_No,'
-        . 'Type,Status,Description,Job_No,Job_Task_No,Cause_of_Absence_Code,Work_Type_Code,'
+    return 'Time_Sheet_No,Line_No,Header_Resource_No,Header_Starting_Date,Header_Ending_Date,'
+        . 'Type,Status,Description,Job_No,Job_Task_No,Cause_of_Absence_Code,Chargeable,Work_Type_Code,'
+        . 'Service_Order_No,Assembly_Order_No,Archived,'
         . 'Field1,Field2,Field3,Field4,Field5,Field6,Field7,Total_Quantity';
 }
 
@@ -123,7 +124,7 @@ function timesheet_sync_webfleet_card_line_select(): string
 
 function timesheet_sync_webfleet_card_select(): string
 {
-    return 'Resource_No,Week_No,Year_No';
+    return 'Resource_No,Resource_Name,Week_No,Year_No,Status';
 }
 
 function timesheet_sync_fetch_webfleet_hours(string $base, array $auth, string $from, string $to, int $ttl, bool $forceRefresh): array

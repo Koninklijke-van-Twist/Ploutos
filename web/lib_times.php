@@ -228,9 +228,46 @@ function timesheet_include_unapproved_hidden_input(bool $includeUnapproved): str
 }
 
 /**
+ * BC levert de urenstaatstatus soms Engels, soms Nederlands.
+ * Eén canonieke waarde voor elke vergelijking: approved, open, submitted, rejected.
+ * Onbekend of leeg blijft de getrimde, kleine tekst. De getoonde kolom gebruikt dit niet.
+ */
+function timesheet_normalize_status(string $status): string
+{
+  $normalized = strtolower(trim($status));
+  static $map = [
+    'approved' => 'approved',
+    'goedgekeurd' => 'approved',
+    'open' => 'open',
+    'submitted' => 'submitted',
+    'ingediend' => 'submitted',
+    'rejected' => 'rejected',
+    'afgewezen' => 'rejected',
+    'afgekeurd' => 'rejected',
+  ];
+  return $map[$normalized] ?? $normalized;
+}
+
+function timesheet_status_is_approved(string $status): bool
+{
+  return timesheet_normalize_status($status) === 'approved';
+}
+
+function timesheet_status_css_class(string $status): string
+{
+  return match (timesheet_normalize_status($status)) {
+    'open' => 'openStatus',
+    'submitted' => 'submittedStatus',
+    'rejected' => 'rejectedStatus',
+    'approved' => 'approvedStatus',
+    default => '',
+  };
+}
+
+/**
  * Goedgekeurde regels tellen altijd mee.
- * Andere statussen (Open, Submitted, Rejected, leeg, …) tellen alleen mee
- * als niet-goedgekeurde staten expliciet getoond worden; dan gelden ze als goedgekeurd.
+ * Andere statussen (Open, Submitted, Rejected, leeg, of de Nederlandse BC-tekst)
+ * tellen alleen mee als niet-goedgekeurde staten expliciet getoond worden.
  */
 function timesheet_line_original_status(array $line): string
 {
@@ -249,17 +286,22 @@ function timesheet_line_display_status(array $line): string
  * Berekeningen mogen een regel als goedgekeurd behandelen via treated_as_approved.
  * De BC-status zelf blijft in Status en original_status staan.
  */
+function timesheet_line_is_originally_approved(array $line): bool
+{
+  return timesheet_status_is_approved(timesheet_line_original_status($line));
+}
+
 function timesheet_line_passes_approved_only_filter(array $line): bool
 {
   if (!empty($line['treated_as_approved'])) {
     return true;
   }
-  return timesheet_line_original_status($line) === 'Approved';
+  return timesheet_line_is_originally_approved($line);
 }
 
 function timesheet_line_counts_as_approved(array $line, bool $includeUnapproved): bool
 {
-  if (timesheet_line_original_status($line) === 'Approved') {
+  if (timesheet_line_is_originally_approved($line)) {
     return true;
   }
   return $includeUnapproved;
@@ -293,15 +335,17 @@ function timesheet_counted_unapproved_row_attr(bool $includeUnapproved, bool $ha
 
 function timesheet_line_highlight_class(array $line, bool $includeUnapproved): string
 {
-  $isUnapproved = timesheet_line_original_status($line) !== 'Approved';
-  return timesheet_row_counts_as_unapproved_highlight($includeUnapproved, $isUnapproved);
+  return timesheet_row_counts_as_unapproved_highlight(
+    $includeUnapproved,
+    !timesheet_line_is_originally_approved($line)
+  );
 }
 
 function timesheet_line_highlight_row_attr(array $line, bool $includeUnapproved): string
 {
   return timesheet_counted_unapproved_row_attr(
     $includeUnapproved,
-    timesheet_line_original_status($line) !== 'Approved'
+    !timesheet_line_is_originally_approved($line)
   );
 }
 
@@ -381,7 +425,7 @@ function timesheet_overview_apply_line(array $week, array $line, bool $includeUn
 
   $originalStatus = timesheet_line_original_status($line);
   $line['original_status'] = $originalStatus;
-  $isApproved = $originalStatus === 'Approved';
+  $isApproved = timesheet_status_is_approved($originalStatus);
   if ($isApproved) {
     $week['hasApproved'] = true;
   } else {

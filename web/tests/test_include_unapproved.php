@@ -111,15 +111,20 @@ test_assert(
     str_contains($hiddenOn, 'name="includeUnapproved"') && str_contains($hiddenOn, 'value="1"')
 );
 
-foreach (['Approved'] as $status) {
+foreach (['Approved', 'approved', ' APPROVED ', 'Goedgekeurd', 'goedgekeurd', ' Goedgekeurd '] as $status) {
     $line = test_line($status, 'SNT', [1 => 8]);
-    test_assert($status . ' telt uit', timesheet_line_counts_as_approved($line, false));
-    test_assert($status . ' telt aan', timesheet_line_counts_as_approved($line, true));
+    test_assert(json_encode($status) . ' telt uit', timesheet_line_counts_as_approved($line, false));
+    test_assert(json_encode($status) . ' telt aan', timesheet_line_counts_as_approved($line, true));
+    test_assert(json_encode($status) . ' niet oranje', timesheet_line_highlight_class($line, true) === '');
+    test_assert(json_encode($status) . ' toont origineel', timesheet_line_display_status($line) === $status);
 }
-foreach (['Open', 'Submitted', 'Rejected', ''] as $status) {
+foreach (['Open', 'Submitted', 'Rejected', '', 'Ingediend', ' ingediend ', 'Afgewezen', 'Afgekeurd'] as $status) {
     $line = test_line($status, 'SNT', [1 => 4]);
-    test_assert($status . ' telt niet uit', timesheet_line_counts_as_approved($line, false) === false);
-    test_assert($status . ' telt wel aan', timesheet_line_counts_as_approved($line, true));
+    test_assert(json_encode($status) . ' telt niet uit', timesheet_line_counts_as_approved($line, false) === false);
+    test_assert(json_encode($status) . ' telt wel aan', timesheet_line_counts_as_approved($line, true));
+    test_assert(json_encode($status) . ' oranje alleen aan', timesheet_line_highlight_class($line, false) === ''
+        && timesheet_line_highlight_class($line, true) === 'counted-unapproved');
+    test_assert(json_encode($status) . ' toont origineel', timesheet_line_display_status($line) === $status);
 }
 
 $approved = test_line('Approved', 'SNT', [1 => 8]);
@@ -351,6 +356,85 @@ test_assert(
         && timesheet_line_highlight_row_attr($approvedHighlight, true) === ''
 );
 
+test_assert('normalisatie trim en case', timesheet_normalize_status('  GoedgeKEURD ') === 'approved');
+test_assert('normalisatie open', timesheet_normalize_status(' Open ') === 'open');
+test_assert('normalisatie ingediend', timesheet_normalize_status('INGEDIEND') === 'submitted');
+test_assert('normalisatie afgewezen', timesheet_normalize_status('Afgewezen') === 'rejected');
+test_assert('normalisatie afgekeurd', timesheet_normalize_status('afgekeurd') === 'rejected');
+test_assert('normalisatie onbekend', timesheet_normalize_status(' Concept ') === 'concept');
+test_assert('normalisatie leeg', timesheet_normalize_status('   ') === '');
+test_assert(
+    'css-klasse volgt normalisatie',
+    timesheet_status_css_class('Goedgekeurd') === 'approvedStatus'
+        && timesheet_status_css_class(' ingediend ') === 'submittedStatus'
+        && timesheet_status_css_class('Afgewezen') === 'rejectedStatus'
+        && timesheet_status_css_class('Open') === 'openStatus'
+        && timesheet_status_css_class('Concept') === ''
+);
+
+$nlOnkostenApproved = timesheet_overview_apply_line(
+    test_blank_week(),
+    test_line('Goedgekeurd', 'ONK', [], 9.5),
+    false,
+    $codesOnkosten,
+    $codesVerlet
+);
+$nlOnkostenOpenOff = timesheet_overview_apply_line(
+    test_blank_week(),
+    test_line('Ingediend', 'ONK', [], 4),
+    false,
+    $codesOnkosten,
+    $codesVerlet
+);
+$nlOnkostenOpenOn = timesheet_overview_apply_line(
+    test_blank_week(),
+    test_line('Ingediend', 'ONK', [], 4),
+    true,
+    $codesOnkosten,
+    $codesVerlet
+);
+test_assert(
+    'onkosten Goedgekeurd telt zonder optie en zonder waarschuwing',
+    (float) $nlOnkostenApproved['onkosten'] === 9.5
+        && empty($nlOnkostenApproved['hasUnapproved'])
+        && !empty($nlOnkostenApproved['hasApproved'])
+);
+test_assert(
+    'onkosten Ingediend uit geeft waarschuwing en telt niet',
+    (float) $nlOnkostenOpenOff['onkosten'] === 0.0
+        && !empty($nlOnkostenOpenOff['hasUnapproved'])
+        && (int) $nlOnkostenOpenOff['unapprovedCount'] === 1
+);
+test_assert(
+    'onkosten Ingediend aan telt mee en blijft een waarschuwing',
+    (float) $nlOnkostenOpenOn['onkosten'] === 4.0
+        && !empty($nlOnkostenOpenOn['hasUnapproved'])
+);
+$nlSotOff = timesheet_overview_apply_line(test_blank_week(), test_line('Afgewezen', 'SOT125', [1 => 2]), false, $codesOnkosten, $codesVerlet);
+$nlSotOn = timesheet_overview_apply_line(test_blank_week(), test_line('Afgewezen', 'SOT125', [1 => 2]), true, $codesOnkosten, $codesVerlet);
+test_assert('salaris Afgewezen uit niet', test_salary_hours($nlSotOff)['h285'] === 0.0 && !empty($nlSotOff['hasUnapproved']));
+test_assert('salaris Afgewezen aan wel en oranje week', test_salary_hours($nlSotOn)['h285'] === 2.0 && !empty($nlSotOn['hasUnapproved']));
+$nlApprovedHours = timesheet_overview_apply_line(test_blank_week(), test_line('Goedgekeurd', 'SOT125', [1 => 3]), false, $codesOnkosten, $codesVerlet);
+test_assert(
+    'salaris Goedgekeurd telt uit en week is niet oranje',
+    test_salary_hours($nlApprovedHours)['h285'] === 3.0
+        && empty($nlApprovedHours['hasUnapproved'])
+        && timesheet_counted_unapproved_row_attr(true, !empty($nlApprovedHours['hasUnapproved'])) === ''
+);
+$nlMix = test_blank_week();
+$nlMix = timesheet_overview_apply_line($nlMix, test_line('Approved', 'SNT', [1 => 8]), true, $codesOnkosten, $codesVerlet);
+$nlMix = timesheet_overview_apply_line($nlMix, test_line('Ingediend', 'SNT', [2 => 1]), true, $codesOnkosten, $codesVerlet);
+test_assert(
+    'mix Engels en Nederlands: alleen Ingediend is niet goedgekeurd',
+    !empty($nlMix['hasApproved'])
+        && !empty($nlMix['hasUnapproved'])
+        && (int) $nlMix['unapprovedCount'] === 1
+        && (float) $nlMix['normalHours'] === 9.0
+        && timesheet_line_highlight_class(test_line('Goedgekeurd', 'SNT'), true) === ''
+        && timesheet_line_highlight_class(test_line('Ingediend', 'SNT'), true) === 'counted-unapproved'
+        && timesheet_line_display_status(test_line('Ingediend', 'SNT')) === 'Ingediend'
+);
+
 $root = dirname(__DIR__);
 $overzicht = (string) file_get_contents($root . '/overzicht.php');
 $weekinspectie = (string) file_get_contents($root . '/weekinspectie.php');
@@ -404,9 +488,14 @@ test_assert(
     'weekinspectie markeert niet-goedgekeurde regels',
     str_contains($weekinspectie, 'timesheet_line_highlight_row_attr($l, $includeUnapproved)')
         && str_contains($weekinspectie, 'timesheet_line_display_status($l)')
+        && str_contains($weekinspectie, 'timesheet_status_css_class($status)')
         && str_contains($weekinspectie, 'foreach ($displayLines as $l)')
         && str_contains($weekinspectie, 'tr.counted-unapproved > td')
         && str_contains($weekinspectie, 'background-color: #ffb347')
+);
+test_assert(
+    'overzicht kleurt status via normalisatie',
+    str_contains($overzicht, 'return timesheet_status_css_class($status);')
 );
 $lib = (string) file_get_contents($root . '/lib_times.php');
 test_assert(
@@ -414,6 +503,13 @@ test_assert(
     !str_contains($lib, "\$line['Status'] = 'Approved'")
         && str_contains($lib, "\$line['original_status']")
         && str_contains($lib, "\$line['treated_as_approved']")
+);
+test_assert(
+    'statusvergelijking loopt via timesheet_normalize_status',
+    str_contains($lib, 'function timesheet_normalize_status')
+        && !preg_match("/===\\s*'Approved'/", $lib)
+        && !preg_match('/===\\s*"Approved"/', $lib)
+        && !preg_match("/!==\\s*'Approved'/", $lib)
 );
 test_assert('weekinspectie geeft de stand door', str_contains($weekinspectie, 'timesheet_include_unapproved_query_suffix($includeUnapproved)'));
 test_assert('onkosten leest de stand', str_contains($onkosten, 'timesheet_include_unapproved_from_request('));

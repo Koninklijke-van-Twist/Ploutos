@@ -45,6 +45,7 @@ $from = trim((string) ($_GET['from'] ?? ''));
 $to = trim((string) ($_GET['to'] ?? ''));
 $selectedApproverUserId = trim((string) ($_GET['approverUserId'] ?? ''));
 $returnPerson = trim((string) ($_GET['returnPerson'] ?? ''));
+$includeUnapproved = timesheet_include_unapproved_from_request($_GET);
 $expenseDefaults = expenses_defaults();
 
 // Bepaal range
@@ -741,55 +742,13 @@ foreach ($lines as $l) {
         ];
     }
 
-    $isApproved = ((string) ($l['Status'] ?? '') === 'Approved');
-    if (!$isApproved) {
-        $byPerson[$personNo]['weeks'][$tsNo]['hasUnapproved'] = true;
-        $byPerson[$personNo]['weeks'][$tsNo]['unapprovedCount']++;
-        continue;
-    }
-
-    // Uren per dag (Field1..7)
-    $dayHours = $byPerson[$personNo]['weeks'][$tsNo]['dayHours'];
-    $byPerson[$personNo]['weeks'][$tsNo]['validationLines'][] = $l;
-
-    $workType = (string) ($l['Work_Type_Code'] ?? '');
-
-    for ($i = 1; $i <= 7; $i++) {
-        if ($workType === 'SOT125')
-            $byPerson[$personNo]['weeks'][$tsNo]['p285'] += $l["Field{$i}"] * 60;
-        else if ($workType === 'SOT150')
-            $byPerson[$personNo]['weeks'][$tsNo]['p47'] += $l["Field{$i}"] * 60;
-        else if ($workType === 'SOT200')
-            $byPerson[$personNo]['weeks'][$tsNo]['p85'] += $l["Field{$i}"] * 60;
-        else
-            $dayHours[$i - 1] = ($dayHours[$i - 1] ?? 0) + (float) ($l["Field{$i}"] ?? 0);
-    }
-
-    $byPerson[$personNo]['weeks'][$tsNo]['dayHours'] = $dayHours;
-
-    // Onkosten / verlet (voorbeeld: via Work_Type_Code en Total_Quantity als bedrag)
-    if (in_array($workType, $CODES_ONKOSTEN, true)) {
-        $byPerson[$personNo]['weeks'][$tsNo]['onkosten'] += (float) ($l['Total_Quantity'] ?? 0);
-        continue;
-    }
-    if (in_array($workType, $CODES_VERLET, true)) {
-        $byPerson[$personNo]['weeks'][$tsNo]['verlet'] += (float) ($l['Total_Quantity'] ?? 0);
-        continue;
-    }
-
-    if (!work_type_is_overtime($workType) && $workType !== 'KM') {
-        $normalHours = (float) ($byPerson[$personNo]['weeks'][$tsNo]['normalHours'] ?? 0);
-        $normalDayHours = $byPerson[$personNo]['weeks'][$tsNo]['normalDayHours'] ?? [0, 0, 0, 0, 0, 0, 0];
-        for ($i = 1; $i <= 7; $i++) {
-            $hours = (float) ($l["Field{$i}"] ?? 0);
-            $normalHours += $hours;
-            $normalDayHours[$i - 1] = ($normalDayHours[$i - 1] ?? 0) + $hours;
-        }
-        $byPerson[$personNo]['weeks'][$tsNo]['normalHours'] = $normalHours;
-        $byPerson[$personNo]['weeks'][$tsNo]['normalDayHours'] = $normalDayHours;
-    }
-
-    $byPerson[$personNo]['weeks'][$tsNo]['lines']++;
+    $byPerson[$personNo]['weeks'][$tsNo] = timesheet_overview_apply_line(
+        $byPerson[$personNo]['weeks'][$tsNo],
+        $l,
+        $includeUnapproved,
+        $CODES_ONKOSTEN,
+        $CODES_VERLET
+    );
 }
 
 $wfFrom = $from;
@@ -805,11 +764,9 @@ foreach ($tsByNo as $t) {
     }
 }
 
+$countingLines = timesheet_lines_counting_as_approved($lines, $includeUnapproved);
 $allJobTaskNos = [];
-foreach ($lines as $l) {
-    if ((string) ($l['Status'] ?? '') !== 'Approved') {
-        continue;
-    }
+foreach ($countingLines as $l) {
     $jobTaskNo = (string) ($l['Job_Task_No'] ?? '');
     if ($jobTaskNo !== '') {
         $allJobTaskNos[$jobTaskNo] = true;
@@ -830,12 +787,9 @@ foreach ($byPerson as $pKey => $person) {
     $webfleetForPerson = [];
 
     $jobTaskNos = [];
-    foreach ($lines as $l) {
+    foreach ($countingLines as $l) {
         $linePersonNo = (string) ($l['Header_Resource_No'] ?? '');
         $lineTsNo = (string) ($l['Time_Sheet_No'] ?? '');
-        if ((string) ($l['Status'] ?? '') !== 'Approved') {
-            continue;
-        }
         if ($linePersonNo === $person['personNo'] && in_array($lineTsNo, $allTsNos, true)) {
             $jobTaskNo = (string) ($l['Job_Task_No'] ?? '');
             if ($jobTaskNo !== '') {
@@ -1181,6 +1135,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && (string) ($_POST['action'] ?? '') =
     }
     if ($selectedApproverUserId !== '') {
         $redirectParams['approverUserId'] = $selectedApproverUserId;
+    }
+    if ($includeUnapproved) {
+        $redirectParams['includeUnapproved'] = '1';
     }
     $redirectParams['issuesOpen'] = '1';
     $redirectParams['issue_missing'] = !empty($postFilters['missing']) ? '1' : '0';
@@ -1571,6 +1528,44 @@ function hhmm(float|int $min): string
             }
         }
 
+        .approval-toggle-bar {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 8px;
+        }
+
+        .include-unapproved-form {
+            display: inline-flex;
+            margin: 0;
+        }
+
+        .include-unapproved-label {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 13px;
+            font-weight: 700;
+            color: #0f172a;
+            background: #fff;
+            border: 1px solid #e2e8f0;
+            border-radius: 10px;
+            padding: 6px 10px;
+        }
+
+        .include-unapproved-label input {
+            width: auto;
+            margin: 0;
+        }
+
+        .include-unapproved-note {
+            margin: 0 0 10px;
+            font-size: 12px;
+            font-weight: 700;
+            color: #92400e;
+        }
+
         .warn-indicator {
             margin-left: 6px;
             cursor: help;
@@ -1850,15 +1845,40 @@ function hhmm(float|int $min): string
                 </div>
             </noprint>
         <?php endif; ?>
-        <?php if ($totalIssuePersons > 0): ?>
-            <noprint>
-                <button class="btn btn-issues-alert"
-                    onclick="document.getElementById('issuesModal').classList.add('active')"
-                    style="background:#fef2f2;border-color:#fca5a5;color:#991b1b;font-weight:700;margin-bottom:8px;">
-                    ⚠️ Missende / onjuiste urenstaten (<?= $totalIssuePersons ?>)
-                </button>
-            </noprint>
-        <?php endif; ?>
+        <noprint>
+            <div class="approval-toggle-bar">
+                <?php if ($totalIssuePersons > 0): ?>
+                    <button class="btn btn-issues-alert"
+                        onclick="document.getElementById('issuesModal').classList.add('active')"
+                        style="background:#fef2f2;border-color:#fca5a5;color:#991b1b;font-weight:700;">
+                        ⚠️ Missende / onjuiste urenstaten (<?= $totalIssuePersons ?>)
+                    </button>
+                <?php endif; ?>
+                <form id="includeUnapprovedForm" method="get" class="include-unapproved-form">
+                    <?php if ($from !== ''): ?>
+                        <input type="hidden" name="from" value="<?= htmlspecialchars($from) ?>">
+                    <?php endif; ?>
+                    <?php if ($to !== ''): ?>
+                        <input type="hidden" name="to" value="<?= htmlspecialchars($to) ?>">
+                    <?php endif; ?>
+                    <?php if ($month !== ''): ?>
+                        <input type="hidden" name="month" value="<?= htmlspecialchars($month) ?>">
+                    <?php endif; ?>
+                    <?php if ($selectedApproverUserId !== ''): ?>
+                        <input type="hidden" name="approverUserId" value="<?= htmlspecialchars($selectedApproverUserId) ?>">
+                    <?php endif; ?>
+                    <?php if ($returnPerson !== ''): ?>
+                        <input type="hidden" name="returnPerson" value="<?= htmlspecialchars($returnPerson) ?>">
+                    <?php endif; ?>
+                    <label class="include-unapproved-label" for="includeUnapproved">
+                        <input type="checkbox" id="includeUnapproved"
+                            name="<?= htmlspecialchars(timesheet_include_unapproved_param()) ?>" value="1"
+                            <?= $includeUnapproved ? 'checked' : '' ?>>
+                        Niet-goedgekeurde staten ook tonen
+                    </label>
+                </form>
+            </div>
+        </noprint>
         <noprint>
             <?= injectTimerHtml([
                 'statusUrl' => 'odata.php?action=cache_status',
@@ -1882,6 +1902,7 @@ function hhmm(float|int $min): string
             if ($selectedApproverUserId !== '') {
                 $exportUrl .= '&approverUserId=' . rawurlencode($selectedApproverUserId);
             }
+            $exportUrl .= timesheet_include_unapproved_query_suffix($includeUnapproved);
             ?>
             <a class="btn" href="<?= htmlspecialchars($exportUrl) ?>">Export totalen als CSV</a>
             <form id="approverFilterForm" method="get" style="display:inline-block; margin-left:8px;">
@@ -1894,6 +1915,7 @@ function hhmm(float|int $min): string
                 <?php if ($month !== ''): ?>
                     <input type="hidden" name="month" value="<?= htmlspecialchars($month) ?>">
                 <?php endif; ?>
+                <?= timesheet_include_unapproved_hidden_input($includeUnapproved) ?>
                 <label for="approverUserId" class="muted" style="margin-left:6px;">Approver:</label>
                 <select id="approverUserId" name="approverUserId" class="btn" style="padding-right:26px;">
                     <option value="">alle</option>
@@ -1937,7 +1959,7 @@ function hhmm(float|int $min): string
                 <?php endif; ?>
                 <noprint>
                     <button class="btn"
-                        onclick="openPrintModal(event, <?= htmlspecialchars(json_encode($person), ENT_QUOTES) ?>)">Toon
+                        onclick="openPrintModal(event, <?= htmlspecialchars(json_encode($person), ENT_QUOTES) ?>, <?= $includeUnapproved ? 'true' : 'false' ?>)">Toon
                         Salarisspecificatie</button>
                     <?php
                     $expensesEditorUrl = "onkosten_editor.php?resourceNo=" . rawurlencode($person['personNo'])
@@ -1945,6 +1967,7 @@ function hhmm(float|int $min): string
                         . "&to=" . rawurlencode($to)
                         . ($month !== '' ? "&month=" . rawurlencode($month) : '')
                         . ($selectedApproverUserId !== '' ? "&approverUserId=" . rawurlencode($selectedApproverUserId) : '')
+                        . timesheet_include_unapproved_query_suffix($includeUnapproved)
                         . "&returnPerson=" . rawurlencode((string) ($person['personNo'] ?? ''))
                         . "&returnPage=overzicht";
                     ?>
@@ -1994,6 +2017,7 @@ function hhmm(float|int $min): string
                                 . "&to=" . rawurlencode($to)
                                 . ($month !== '' ? "&month=" . rawurlencode($month) : '')
                                 . ($selectedApproverUserId !== '' ? "&approverUserId=" . rawurlencode($selectedApproverUserId) : '')
+                                . timesheet_include_unapproved_query_suffix($includeUnapproved)
                                 . "&returnPerson=" . rawurlencode((string) ($person['personNo'] ?? ''));
                             ?>
                             <tr>
@@ -2003,7 +2027,9 @@ function hhmm(float|int $min): string
                                     </a>
                                     <?php if (!empty($w['hasUnapproved'])): ?>
                                         <span class="warn-indicator"
-                                            title="Deze week bevat niet-goedgekeurde regels.&#10;Deze regels worden niet meegeteld in het overzicht.">⚠️
+                                            title="<?= $includeUnapproved
+                                                ? htmlspecialchars('Deze week bevat niet-goedgekeurde regels. Deze regels worden meegeteld alsof ze goedgekeurd zijn.')
+                                                : 'Deze week bevat niet-goedgekeurde regels.&#10;Deze regels worden niet meegeteld in het overzicht.' ?>">⚠️
                                             <noprint><?= (int) ($w['unapprovedCount'] ?? 0) ?>
                                         </span></noprint>
                                     <?php endif; ?>
@@ -2112,6 +2138,7 @@ function hhmm(float|int $min): string
                                 . "&to=" . rawurlencode($to)
                                 . ($month !== '' ? "&month=" . rawurlencode($month) : '')
                                 . ($selectedApproverUserId !== '' ? "&approverUserId=" . rawurlencode($selectedApproverUserId) : '')
+                                . timesheet_include_unapproved_query_suffix($includeUnapproved)
                                 . "&returnPerson=" . rawurlencode((string) ($person['personNo'] ?? ''))
                                 . "&returnPage=overzicht"
                                 . "&returnTsNo=" . rawurlencode((string) ($w['tsNo'] ?? ''));
@@ -2267,6 +2294,17 @@ function hhmm(float|int $min): string
             {
                 showPageLoader();
                 approverForm.submit();
+            });
+        }
+
+        const includeUnapprovedForm = document.getElementById('includeUnapprovedForm');
+        const includeUnapprovedInput = document.getElementById('includeUnapproved');
+        if (includeUnapprovedForm && includeUnapprovedInput)
+        {
+            includeUnapprovedInput.addEventListener('change', function ()
+            {
+                showPageLoader();
+                includeUnapprovedForm.submit();
             });
         }
 
@@ -2592,11 +2630,14 @@ function hhmm(float|int $min): string
             const m = Math.round(min % 60);
             return `${sign}${h}:${String(m).padStart(2, '0')}`;
         }
-        function openPrintModal (event, person)
+        function openPrintModal (event, person, includeUnapproved)
         {
             event.preventDefault();
             const modal = document.getElementById('printModal');
             const content = document.getElementById('salarySlipContent');
+            const includeUnapprovedNote = includeUnapproved
+                ? '<div class="include-unapproved-note">Niet-goedgekeurde urenstaten zijn meegeteld alsof ze goedgekeurd zijn.</div>'
+                : '';
 
             // Build weeks columns
             let weeksHtml = '';
@@ -2721,7 +2762,7 @@ function hhmm(float|int $min): string
                         <div class="employee-info-label"><!--email--></div>
                         <div></div>
                     </div>
-                </div>
+                </div>${includeUnapprovedNote}
 
                 <table class="salary-table">
                     <thead>

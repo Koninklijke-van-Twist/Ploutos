@@ -3,6 +3,7 @@ require __DIR__ . "/odata.php";
 require __DIR__ . "/auth.php";
 require __DIR__ . "/logincheck.php";
 require __DIR__ . "/lib_expenses.php";
+require __DIR__ . "/lib_times.php";
 require __DIR__ . "/lib_timesheet_store.php";
 
 $resourceNo = trim((string) ($_GET['resourceNo'] ?? $_POST['resourceNo'] ?? ''));
@@ -13,6 +14,7 @@ $selectedApproverUserId = trim((string) ($_GET['approverUserId'] ?? $_POST['appr
 $returnPerson = trim((string) ($_GET['returnPerson'] ?? $_POST['returnPerson'] ?? ''));
 $returnPage = trim((string) ($_GET['returnPage'] ?? $_POST['returnPage'] ?? 'overzicht'));
 $returnTsNo = trim((string) ($_GET['returnTsNo'] ?? $_POST['returnTsNo'] ?? ''));
+$includeUnapproved = timesheet_include_unapproved_from_request(array_merge($_GET, $_POST));
 
 if (!in_array($returnPage, ['overzicht', 'weekinspectie'], true)) {
     $returnPage = 'overzicht';
@@ -82,6 +84,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         . ($returnPerson !== '' ? '&returnPerson=' . rawurlencode($returnPerson) : '')
         . '&returnPage=' . rawurlencode($returnPage)
         . '&returnTsNo=' . rawurlencode($returnTsNo)
+        . timesheet_include_unapproved_query_suffix($includeUnapproved)
         . '&saved=1';
     header('Location: ' . $redirectUrl);
     exit;
@@ -96,14 +99,16 @@ if ($returnPage === 'weekinspectie' && $returnTsNo !== '') {
         . '&from=' . rawurlencode($from)
         . '&to=' . rawurlencode($to)
         . ($selectedApproverUserId !== '' ? '&approverUserId=' . rawurlencode($selectedApproverUserId) : '')
-        . ($returnPerson !== '' ? '&returnPerson=' . rawurlencode($returnPerson) : '');
+        . ($returnPerson !== '' ? '&returnPerson=' . rawurlencode($returnPerson) : '')
+        . timesheet_include_unapproved_query_suffix($includeUnapproved);
     $backLabel = 'Terug naar weekinspectie';
 } else {
     $backUrl = 'overzicht.php?from=' . rawurlencode($from)
         . '&to=' . rawurlencode($to)
         . ($month !== '' ? '&month=' . rawurlencode($month) : '')
         . ($selectedApproverUserId !== '' ? '&approverUserId=' . rawurlencode($selectedApproverUserId) : '')
-        . ($returnPerson !== '' ? '&returnPerson=' . rawurlencode($returnPerson) : '');
+        . ($returnPerson !== '' ? '&returnPerson=' . rawurlencode($returnPerson) : '')
+        . timesheet_include_unapproved_query_suffix($includeUnapproved);
     $backLabel = 'Terug naar overzicht';
 }
 $typeKeys = array_keys($types);
@@ -274,6 +279,7 @@ $rightTypeKeys = array_slice($typeKeys, $splitAt);
                     <input type="hidden" name="returnPerson" value="<?= htmlspecialchars($returnPerson) ?>">
                     <input type="hidden" name="returnPage" value="<?= htmlspecialchars($returnPage) ?>">
                     <input type="hidden" name="returnTsNo" value="<?= htmlspecialchars($returnTsNo) ?>">
+                    <?= timesheet_include_unapproved_hidden_input($includeUnapproved) ?>
 
                     <div class="weeks">
                         <?php foreach ($tsRows as $t): ?>

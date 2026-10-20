@@ -46,6 +46,7 @@ $to = trim((string) ($_GET['to'] ?? ''));
 $month = trim((string) ($_GET['month'] ?? ''));
 $selectedApproverUserId = trim((string) ($_GET['approverUserId'] ?? ''));
 $returnPerson = trim((string) ($_GET['returnPerson'] ?? ''));
+$includeUnapproved = timesheet_include_unapproved_from_request($_GET);
 if ($tsNo === '' || $resourceNo === '')
     die("tsNo/resourceNo ontbreekt");
 
@@ -68,7 +69,7 @@ $lines = array_values(array_filter($linesAll, function ($l) use ($resourceNo) {
     return (string) ($l['Header_Resource_No'] ?? '') === $resourceNo;
 }));
 
-$hourIssueData = detect_hour_entry_issues($lines);
+$hourIssueData = detect_hour_entry_issues(timesheet_inspection_lines_as_counted($lines, $includeUnapproved));
 $weekHasHourIssues = (bool) ($hourIssueData['hasIssues'] ?? false);
 $dayTotals = (array) ($hourIssueData['dayTotals'] ?? array_fill(0, 7, 0.0));
 $over24Days = (array) ($hourIssueData['over24Days'] ?? array_fill(0, 7, false));
@@ -108,13 +109,15 @@ $expensesEditorUrl = 'onkosten_editor.php?resourceNo=' . rawurlencode($resourceN
     . ($selectedApproverUserId !== '' ? '&approverUserId=' . rawurlencode($selectedApproverUserId) : '')
     . ($returnPerson !== '' ? '&returnPerson=' . rawurlencode($returnPerson) : '')
     . '&returnPage=weekinspectie'
-    . '&returnTsNo=' . rawurlencode($tsNo);
+    . '&returnTsNo=' . rawurlencode($tsNo)
+    . timesheet_include_unapproved_query_suffix($includeUnapproved);
 
 $backUrl = 'overzicht.php?from=' . rawurlencode($backFrom)
     . '&to=' . rawurlencode($backTo)
     . ($month !== '' ? '&month=' . rawurlencode($month) : '')
     . ($selectedApproverUserId !== '' ? '&approverUserId=' . rawurlencode($selectedApproverUserId) : '')
-    . ($returnPerson !== '' ? '&returnPerson=' . rawurlencode($returnPerson) : '');
+    . ($returnPerson !== '' ? '&returnPerson=' . rawurlencode($returnPerson) : '')
+    . timesheet_include_unapproved_query_suffix($includeUnapproved);
 
 $weekNoFromDescription = 0;
 $description = (string) ($ts['Description'] ?? '');
@@ -365,6 +368,16 @@ function dayIsHoliday($i)
             font-weight: 700;
         }
 
+        .include-unapproved-note {
+            margin: 8px 0 10px;
+            padding: 8px 10px;
+            border: 1px solid #fcd34d;
+            background: #fffbeb;
+            color: #92400e;
+            border-radius: 10px;
+            font-weight: 700;
+        }
+
         .webfleet-notice {
             margin: 10px 0;
             padding: 8px 10px;
@@ -432,6 +445,9 @@ function dayIsHoliday($i)
                 <?= htmlspecialchars((string) formatDate($ts['Starting_Date'] ?? '')) ?> –
                 <?= htmlspecialchars((string) formatDate($ts['Ending_Date'] ?? '')) ?><br>
             </div>
+            <?php if ($includeUnapproved): ?>
+                <div class="include-unapproved-note">Niet-goedgekeurde regels tellen mee alsof ze goedgekeurd zijn.</div>
+            <?php endif; ?>
             <?php if ($weekHasHourIssues): ?>
                 <div class="hour-issue-summary">Onjuist ingevulde uren gedetecteerd!</div>
             <?php endif; ?>

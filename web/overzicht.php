@@ -736,6 +736,7 @@ foreach ($lines as $l) {
             'normalHours' => 0.0,
             'normalDayHours' => [0, 0, 0, 0, 0, 0, 0],
             'hasUnapproved' => false,
+            'hasApproved' => false,
             'unapprovedCount' => 0,
             'validationLines' => [],
             'hasHourIssues' => false,

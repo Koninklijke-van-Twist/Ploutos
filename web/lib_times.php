@@ -139,7 +139,7 @@ function detect_hour_entry_issues(array $lines, bool $approvedOnly = false): arr
   $sot150ByDay = array_fill(0, 7, 0.0);
 
   foreach ($lines as $line) {
-    if ($approvedOnly && (string) ($line['Status'] ?? '') !== 'Approved') {
+    if ($approvedOnly && !timesheet_line_passes_approved_only_filter($line)) {
       continue;
     }
 
@@ -232,9 +232,34 @@ function timesheet_include_unapproved_hidden_input(bool $includeUnapproved): str
  * Andere statussen (Open, Submitted, Rejected, leeg, …) tellen alleen mee
  * als niet-goedgekeurde staten expliciet getoond worden; dan gelden ze als goedgekeurd.
  */
+function timesheet_line_original_status(array $line): string
+{
+  if (array_key_exists('original_status', $line)) {
+    return (string) $line['original_status'];
+  }
+  return (string) ($line['Status'] ?? '');
+}
+
+function timesheet_line_display_status(array $line): string
+{
+  return timesheet_line_original_status($line);
+}
+
+/**
+ * Berekeningen mogen een regel als goedgekeurd behandelen via treated_as_approved.
+ * De BC-status zelf blijft in Status en original_status staan.
+ */
+function timesheet_line_passes_approved_only_filter(array $line): bool
+{
+  if (!empty($line['treated_as_approved'])) {
+    return true;
+  }
+  return timesheet_line_original_status($line) === 'Approved';
+}
+
 function timesheet_line_counts_as_approved(array $line, bool $includeUnapproved): bool
 {
-  if ((string) ($line['Status'] ?? '') === 'Approved') {
+  if (timesheet_line_original_status($line) === 'Approved') {
     return true;
   }
   return $includeUnapproved;
@@ -268,7 +293,7 @@ function timesheet_counted_unapproved_row_attr(bool $includeUnapproved, bool $ha
 
 function timesheet_line_highlight_class(array $line, bool $includeUnapproved): string
 {
-  $isUnapproved = (string) ($line['Status'] ?? '') !== 'Approved';
+  $isUnapproved = timesheet_line_original_status($line) !== 'Approved';
   return timesheet_row_counts_as_unapproved_highlight($includeUnapproved, $isUnapproved);
 }
 
@@ -276,7 +301,7 @@ function timesheet_line_highlight_row_attr(array $line, bool $includeUnapproved)
 {
   return timesheet_counted_unapproved_row_attr(
     $includeUnapproved,
-    (string) ($line['Status'] ?? '') !== 'Approved'
+    timesheet_line_original_status($line) !== 'Approved'
   );
 }
 
@@ -322,8 +347,8 @@ function timesheet_lines_counting_as_approved(array $lines, bool $includeUnappro
 
 /**
  * Weekinspectie: uit laat de regels ongemoeid (huidige pagina).
- * Aan behandelt niet-goedgekeurde regels als Approved voor berekeningen die op Status filteren.
- * De getoonde tabel blijft de echte Status gebruiken.
+ * Aan zet treated_as_approved, zodat berekeningen die op goedgekeurd filteren
+ * de regel meetellen. Status en original_status blijven de BC-status.
  */
 function timesheet_inspection_lines_as_counted(array $lines, bool $includeUnapproved): array
 {
@@ -336,9 +361,10 @@ function timesheet_inspection_lines_as_counted(array $lines, bool $includeUnappr
     if (!is_array($line)) {
       continue;
     }
-    if ((string) ($line['Status'] ?? '') !== 'Approved') {
-      $line['Status'] = 'Approved';
-    }
+    $original = timesheet_line_original_status($line);
+    $line['original_status'] = $original;
+    $line['Status'] = $original;
+    $line['treated_as_approved'] = true;
     $counted[] = $line;
   }
   return $counted;
@@ -353,14 +379,19 @@ function timesheet_overview_apply_line(array $week, array $line, bool $includeUn
 {
   require_once __DIR__ . '/lib_contract_hours.php';
 
-  $isApproved = ((string) ($line['Status'] ?? '') === 'Approved');
-  if (!$isApproved) {
+  $originalStatus = timesheet_line_original_status($line);
+  $line['original_status'] = $originalStatus;
+  $isApproved = $originalStatus === 'Approved';
+  if ($isApproved) {
+    $week['hasApproved'] = true;
+  } else {
     $week['hasUnapproved'] = true;
     $week['unapprovedCount'] = (int) ($week['unapprovedCount'] ?? 0) + 1;
     if (!$includeUnapproved) {
       return $week;
     }
   }
+  $line['treated_as_approved'] = true;
 
   $dayHours = $week['dayHours'];
   $week['validationLines'][] = $line;

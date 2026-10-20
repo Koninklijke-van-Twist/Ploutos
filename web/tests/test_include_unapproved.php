@@ -262,6 +262,34 @@ test_assert(
         && (detect_hour_entry_issues($inspectionOn, true)['dayTotals'][0] ?? -1) === 11.0
 );
 
+test_assert('markering-klasse', timesheet_counted_unapproved_class() === 'counted-unapproved');
+test_assert('markering uit bij optie uit', timesheet_row_counts_as_unapproved_highlight(false, true) === '');
+test_assert('markering uit zonder niet-goedgekeurd', timesheet_row_counts_as_unapproved_highlight(true, false) === '');
+test_assert(
+    'markering aan',
+    timesheet_row_counts_as_unapproved_highlight(true, true) === 'counted-unapproved'
+);
+$highlightAttr = timesheet_counted_unapproved_row_attr(true, true);
+test_assert('rij-attribuut leeg als optie uit', timesheet_counted_unapproved_row_attr(false, true) === '');
+test_assert('rij-attribuut leeg zonder niet-goedgekeurd', timesheet_counted_unapproved_row_attr(true, false) === '');
+test_assert('rij-attribuut aan', $highlightAttr === ' class="counted-unapproved"');
+foreach (['Open', 'Submitted', 'Rejected', ''] as $status) {
+    $line = test_line($status, 'SNT', [1 => 1]);
+    test_assert(
+        'regel ' . ($status === '' ? 'leeg' : $status) . ' oranje alleen aan',
+        timesheet_line_highlight_class($line, false) === ''
+            && timesheet_line_highlight_class($line, true) === 'counted-unapproved'
+            && timesheet_line_highlight_row_attr($line, true) === $highlightAttr
+            && timesheet_line_highlight_row_attr($line, false) === ''
+    );
+}
+$approvedHighlight = test_line('Approved', 'SNT', [1 => 8]);
+test_assert(
+    'goedgekeurde regel blijft zonder oranje',
+    timesheet_line_highlight_class($approvedHighlight, true) === ''
+        && timesheet_line_highlight_row_attr($approvedHighlight, true) === ''
+);
+
 $root = dirname(__DIR__);
 $overzicht = (string) file_get_contents($root . '/overzicht.php');
 $weekinspectie = (string) file_get_contents($root . '/weekinspectie.php');
@@ -278,8 +306,45 @@ test_assert(
         && str_contains($overzicht, 'Niet-goedgekeurde urenstaten zijn meegeteld alsof ze goedgekeurd zijn.')
         && str_contains($overzicht, '(week.p285 || 0) / 60')
 );
+test_assert(
+    'overzicht markeert weekrijen die als goedgekeurd meetellen',
+    str_contains($overzicht, 'timesheet_counted_unapproved_row_attr($includeUnapproved, !empty($w[\'hasUnapproved\']))')
+        && substr_count($overzicht, 'timesheet_counted_unapproved_row_attr(') >= 2
+        && str_contains($overzicht, 'tr.counted-unapproved > td')
+        && str_contains($overzicht, 'background-color: #ffb347')
+);
+test_assert(
+    'salarisspecificatie markeert niet-goedgekeurde weken op scherm',
+    str_contains($overzicht, 'if (!includeUnapproved || !week || !week.hasUnapproved)')
+        && str_contains($overzicht, "return ' class=\"counted-unapproved\"';")
+        && str_contains($overzicht, 'countedUnapprovedAttr(week)')
+        && str_contains($overzicht, '@media screen')
+        && str_contains($overzicht, '.salary-table td.counted-unapproved')
+        && str_contains($overzicht, '.salary-table th.counted-unapproved')
+);
+$printStart = strpos($overzicht, 'body.salary-slip-open .print-modal');
+$printSlice = $printStart === false ? '' : substr($overzicht, $printStart, 900);
+test_assert(
+    'print verbergt de meetelezin',
+    str_contains($overzicht, '<noprint><div class="include-unapproved-note">Niet-goedgekeurde urenstaten zijn meegeteld alsof ze goedgekeurd zijn.</div></noprint>')
+        && str_contains($printSlice, '#salarySlipContent .include-unapproved-note')
+        && str_contains($printSlice, 'display: none !important')
+);
+test_assert(
+    'print verbergt oranje achtergrond op de salarisspecificatie',
+    str_contains($printSlice, '#salarySlipContent th.counted-unapproved')
+        && str_contains($printSlice, 'background-color: #f0f0f0 !important')
+        && str_contains($printSlice, '#salarySlipContent td.counted-unapproved')
+        && str_contains($printSlice, 'background-color: transparent !important')
+);
 test_assert('weekinspectie leest de stand', str_contains($weekinspectie, 'timesheet_include_unapproved_from_request($_GET)'));
 test_assert('weekinspectie telt met dezelfde stand', str_contains($weekinspectie, 'timesheet_inspection_lines_as_counted('));
+test_assert(
+    'weekinspectie markeert niet-goedgekeurde regels',
+    str_contains($weekinspectie, 'timesheet_line_highlight_row_attr($l, $includeUnapproved)')
+        && str_contains($weekinspectie, 'tr.counted-unapproved > td')
+        && str_contains($weekinspectie, 'background-color: #ffb347')
+);
 test_assert('weekinspectie geeft de stand door', str_contains($weekinspectie, 'timesheet_include_unapproved_query_suffix($includeUnapproved)'));
 test_assert('onkosten leest de stand', str_contains($onkosten, 'timesheet_include_unapproved_from_request('));
 test_assert('onkosten geeft de stand door', str_contains($onkosten, 'timesheet_include_unapproved_query_suffix($includeUnapproved)'));

@@ -1566,6 +1566,10 @@ function hhmm(float|int $min): string
             color: #92400e;
         }
 
+        tr.counted-unapproved > td {
+            background-color: #ffb347;
+        }
+
         .warn-indicator {
             margin-left: 6px;
             cursor: help;
@@ -1741,6 +1745,13 @@ function hhmm(float|int $min): string
             border: none;
         }
 
+        @media screen {
+            .salary-table th.counted-unapproved,
+            .salary-table td.counted-unapproved {
+                background-color: #ffb347;
+            }
+        }
+
         .kvt_banner {
             background: #1a3a7a;
             width: 100%;
@@ -1826,6 +1837,20 @@ function hhmm(float|int $min): string
                 background: none;
                 padding: 0;
                 display: block !important;
+            }
+
+            #salarySlipContent .include-unapproved-note {
+                display: none !important;
+            }
+
+            #salarySlipContent th.counted-unapproved {
+                background: #f0f0f0 !important;
+                background-color: #f0f0f0 !important;
+            }
+
+            #salarySlipContent td.counted-unapproved {
+                background: transparent !important;
+                background-color: transparent !important;
             }
         }
     </style>
@@ -2020,7 +2045,7 @@ function hhmm(float|int $min): string
                                 . timesheet_include_unapproved_query_suffix($includeUnapproved)
                                 . "&returnPerson=" . rawurlencode((string) ($person['personNo'] ?? ''));
                             ?>
-                            <tr>
+                            <tr<?= timesheet_counted_unapproved_row_attr($includeUnapproved, !empty($w['hasUnapproved'])) ?>>
                                 <td>
                                     <a class="btn js-nav-loading" href="<?= htmlspecialchars($inspectUrl) ?>">
                                         <noprint>Bekijk <?= $w['lines'] ?></noprint>&nbsp;
@@ -2143,7 +2168,7 @@ function hhmm(float|int $min): string
                                 . "&returnPage=overzicht"
                                 . "&returnTsNo=" . rawurlencode((string) ($w['tsNo'] ?? ''));
                             ?>
-                            <tr>
+                            <tr<?= timesheet_counted_unapproved_row_attr($includeUnapproved, !empty($w['hasUnapproved'])) ?>>
                                 <td>
                                     <a class="btn" href="<?= htmlspecialchars($weekEditExpensesUrl) ?>">
                                         <noprint>Bewerk</noprint>&nbsp;
@@ -2636,8 +2661,16 @@ function hhmm(float|int $min): string
             const modal = document.getElementById('printModal');
             const content = document.getElementById('salarySlipContent');
             const includeUnapprovedNote = includeUnapproved
-                ? '<div class="include-unapproved-note">Niet-goedgekeurde urenstaten zijn meegeteld alsof ze goedgekeurd zijn.</div>'
+                ? '<noprint><div class="include-unapproved-note">Niet-goedgekeurde urenstaten zijn meegeteld alsof ze goedgekeurd zijn.</div></noprint>'
                 : '';
+            const countedUnapprovedAttr = function (week)
+            {
+                if (!includeUnapproved || !week || !week.hasUnapproved)
+                {
+                    return '';
+                }
+                return ' class="counted-unapproved"';
+            };
 
             // Build weeks columns
             let weeksHtml = '';
@@ -2647,7 +2680,7 @@ function hhmm(float|int $min): string
                 const weekYear = week.weekStart.substring(0, 4);
                 const weekDate = new Date(week.weekStart);
                 const weekNum = Math.ceil((weekDate.getDate() + new Date(weekDate.getFullYear(), weekDate.getMonth(), 1).getDay()) / 7);
-                weeksHtml += `<th>${weekYear}${String(weekNum).padStart(2, '0')}</th>`;
+                weeksHtml += `<th${countedUnapprovedAttr(week)}>${weekYear}${String(weekNum).padStart(2, '0')}</th>`;
             });
             weeksHtml += '<th>Totaal</th>';
 
@@ -2685,9 +2718,10 @@ function hhmm(float|int $min): string
                 const h285 = ((week.p285 || 0) / 60).toFixed(2);
                 const h47 = ((week.p47 || 0) / 60).toFixed(2);
                 const h85 = ((week.p85 || 0) / 60).toFixed(2);
-                hours285Cells += `<td>${h285 > 0 ? round_to_quarters(h285) : ''}</td>`;
-                hours47Cells += `<td>${h47 > 0 ? round_to_quarters(h47) : ''}</td>`;
-                hours85Cells += `<td>${h85 > 0 ? round_to_quarters(h85) : ''}</td>`;
+                const weekCellAttr = countedUnapprovedAttr(week);
+                hours285Cells += `<td${weekCellAttr}>${h285 > 0 ? round_to_quarters(h285) : ''}</td>`;
+                hours47Cells += `<td${weekCellAttr}>${h47 > 0 ? round_to_quarters(h47) : ''}</td>`;
+                hours85Cells += `<td${weekCellAttr}>${h85 > 0 ? round_to_quarters(h85) : ''}</td>`;
 
                 const extraHours = Number(week.extraHours || 0);
                 totalExtra += extraHours;
@@ -2695,7 +2729,7 @@ function hhmm(float|int $min): string
                 {
                     hasExtraHours = true;
                 }
-                extraHoursCells += `<td>${extraHours > 0.001 ? round_to_quarters(extraHours) : ''}</td>`;
+                extraHoursCells += `<td${weekCellAttr}>${extraHours > 0.001 ? round_to_quarters(extraHours) : ''}</td>`;
 
                 // Use centrally calculated time-based allowances
                 const allowances = week.allowances || { allowance009: 0, allowance018: 0, allowance030: 0 };
@@ -2708,12 +2742,12 @@ function hhmm(float|int $min): string
                 {
                     const value = Math.max(0, Math.round(Number(weekExpenses[key] || 0)));
                     expenseRows[key].total += value;
-                    expenseRows[key].cells += `<td>${value > 0 ? value : ''}</td>`;
+                    expenseRows[key].cells += `<td${weekCellAttr}>${value > 0 ? value : ''}</td>`;
                 });
 
-                allowance009Cells += `<td>${allowances.allowance009 > 0 ? round_to_quarters(allowances.allowance009) : ''}</td>`;
-                allowance018Cells += `<td>${allowances.allowance018 > 0 ? round_to_quarters(allowances.allowance018) : ''}</td>`;
-                allowance030Cells += `<td>${allowances.allowance030 > 0 ? round_to_quarters(allowances.allowance030) : ''}</td>`;
+                allowance009Cells += `<td${weekCellAttr}>${allowances.allowance009 > 0 ? round_to_quarters(allowances.allowance009) : ''}</td>`;
+                allowance018Cells += `<td${weekCellAttr}>${allowances.allowance018 > 0 ? round_to_quarters(allowances.allowance018) : ''}</td>`;
+                allowance030Cells += `<td${weekCellAttr}>${allowances.allowance030 > 0 ? round_to_quarters(allowances.allowance030) : ''}</td>`;
             });
             hours285Cells += `<td><strong>${round_to_quarters(total285.toFixed(2))}</strong></td>`;
             hours47Cells += `<td><strong>${round_to_quarters(total47.toFixed(2))}</strong></td>`;

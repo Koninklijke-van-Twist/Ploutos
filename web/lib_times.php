@@ -240,6 +240,46 @@ function timesheet_line_counts_as_approved(array $line, bool $includeUnapproved)
   return $includeUnapproved;
 }
 
+function timesheet_counted_unapproved_class(): string
+{
+  return 'counted-unapproved';
+}
+
+/**
+ * Klasse voor een regel die niet goedgekeurd is, maar wel als goedgekeurd meetelt.
+ * Leeg als de optie uit staat of de regel echt Approved is.
+ */
+function timesheet_row_counts_as_unapproved_highlight(bool $includeUnapproved, bool $hasUnapproved): string
+{
+  if (!$includeUnapproved || !$hasUnapproved) {
+    return '';
+  }
+  return timesheet_counted_unapproved_class();
+}
+
+function timesheet_counted_unapproved_row_attr(bool $includeUnapproved, bool $hasUnapproved): string
+{
+  $class = timesheet_row_counts_as_unapproved_highlight($includeUnapproved, $hasUnapproved);
+  if ($class === '') {
+    return '';
+  }
+  return ' class="' . htmlspecialchars($class, ENT_QUOTES, 'UTF-8') . '"';
+}
+
+function timesheet_line_highlight_class(array $line, bool $includeUnapproved): string
+{
+  $isUnapproved = (string) ($line['Status'] ?? '') !== 'Approved';
+  return timesheet_row_counts_as_unapproved_highlight($includeUnapproved, $isUnapproved);
+}
+
+function timesheet_line_highlight_row_attr(array $line, bool $includeUnapproved): string
+{
+  return timesheet_counted_unapproved_row_attr(
+    $includeUnapproved,
+    (string) ($line['Status'] ?? '') !== 'Approved'
+  );
+}
+
 /**
  * Scheidt een afgeleide cache per stand. De ruwe BC-/sqlite-cache blijft gedeeld;
  * die bevat alle statussen en filtert niet.

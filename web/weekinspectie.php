@@ -358,6 +358,10 @@ function dayIsHoliday($i)
             color: #700;
         }
 
+        tr.counted-unapproved > td {
+            background-color: #ffb347;
+        }
+
         .hour-issue-summary {
             margin: 8px 0 10px;
             padding: 8px 10px;
@@ -486,7 +490,7 @@ function dayIsHoliday($i)
                 <tbody>
 
                     <?php foreach ($lines as $l): ?>
-                        <tr>
+                        <tr<?= timesheet_line_highlight_row_attr($l, $includeUnapproved) ?>>
                             <td>
                                 <?= $l['Time_Sheet_No'] . "-" . ((int) ($l['Line_No'] ?? 0)) ?>
                             </td>

@@ -187,3 +187,181 @@ function detect_hour_entry_issues(array $lines, bool $approvedOnly = false): arr
     'hasIssues' => $hasIssues,
   ];
 }
+
+/**
+ * Queryparam voor "Niet-goedgekeurde staten ook tonen".
+ * Alleen de waarde 1 zet de stand aan; afwezig of iets anders blijft uit.
+ */
+function timesheet_include_unapproved_param(): string
+{
+  return 'includeUnapproved';
+}
+
+function timesheet_include_unapproved_from_request(array $query): bool
+{
+  $param = timesheet_include_unapproved_param();
+  if (!array_key_exists($param, $query)) {
+    return false;
+  }
+  $value = $query[$param];
+  if (is_array($value)) {
+    return false;
+  }
+  return (string) $value === '1';
+}
+
+function timesheet_include_unapproved_query_suffix(bool $includeUnapproved): string
+{
+  if (!$includeUnapproved) {
+    return '';
+  }
+  return '&' . rawurlencode(timesheet_include_unapproved_param()) . '=1';
+}
+
+function timesheet_include_unapproved_hidden_input(bool $includeUnapproved): string
+{
+  if (!$includeUnapproved) {
+    return '';
+  }
+  $name = htmlspecialchars(timesheet_include_unapproved_param(), ENT_QUOTES, 'UTF-8');
+  return '<input type="hidden" name="' . $name . '" value="1">';
+}
+
+/**
+ * Goedgekeurde regels tellen altijd mee.
+ * Andere statussen (Open, Submitted, Rejected, leeg, …) tellen alleen mee
+ * als niet-goedgekeurde staten expliciet getoond worden; dan gelden ze als goedgekeurd.
+ */
+function timesheet_line_counts_as_approved(array $line, bool $includeUnapproved): bool
+{
+  if ((string) ($line['Status'] ?? '') === 'Approved') {
+    return true;
+  }
+  return $includeUnapproved;
+}
+
+/**
+ * Scheidt een afgeleide cache per stand. De ruwe BC-/sqlite-cache blijft gedeeld;
+ * die bevat alle statussen en filtert niet.
+ */
+function timesheet_approval_view_cache_key(string $cacheKey, bool $includeUnapproved): string
+{
+  return $cacheKey . "\n" . ($includeUnapproved ? 'include-unapproved' : 'approved-only');
+}
+
+function timesheet_lines_counting_as_approved(array $lines, bool $includeUnapproved): array
+{
+  static $memo = [];
+
+  $parts = [];
+  foreach ($lines as $line) {
+    if (!is_array($line)) {
+      $parts[] = 'invalid';
+      continue;
+    }
+    $encoded = json_encode($line, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    $parts[] = $encoded === false ? serialize($line) : $encoded;
+  }
+  $cacheKey = timesheet_approval_view_cache_key(hash('sha256', implode("\n", $parts)), $includeUnapproved);
+  if (array_key_exists($cacheKey, $memo)) {
+    return $memo[$cacheKey];
+  }
+
+  $counted = [];
+  foreach ($lines as $line) {
+    if (!is_array($line)) {
+      continue;
+    }
+    if (timesheet_line_counts_as_approved($line, $includeUnapproved)) {
+      $counted[] = $line;
+    }
+  }
+  $memo[$cacheKey] = $counted;
+  return $counted;
+}
+
+/**
+ * Weekinspectie: uit laat de regels ongemoeid (huidige pagina).
+ * Aan behandelt niet-goedgekeurde regels als Approved voor berekeningen die op Status filteren.
+ * De getoonde tabel blijft de echte Status gebruiken.
+ */
+function timesheet_inspection_lines_as_counted(array $lines, bool $includeUnapproved): array
+{
+  if (!$includeUnapproved) {
+    return $lines;
+  }
+
+  $counted = [];
+  foreach ($lines as $line) {
+    if (!is_array($line)) {
+      continue;
+    }
+    if ((string) ($line['Status'] ?? '') !== 'Approved') {
+      $line['Status'] = 'Approved';
+    }
+    $counted[] = $line;
+  }
+  return $counted;
+}
+
+/**
+ * Telt een urenstaatregel mee in een weekbucket van het overzicht.
+ * Niet-goedgekeurde regels krijgen altijd de waarschuwing, maar hun uren,
+ * onkosten, verlet en validatieregels alleen als $includeUnapproved aan staat.
+ */
+function timesheet_overview_apply_line(array $week, array $line, bool $includeUnapproved, array $codesOnkosten, array $codesVerlet): array
+{
+  require_once __DIR__ . '/lib_contract_hours.php';
+
+  $isApproved = ((string) ($line['Status'] ?? '') === 'Approved');
+  if (!$isApproved) {
+    $week['hasUnapproved'] = true;
+    $week['unapprovedCount'] = (int) ($week['unapprovedCount'] ?? 0) + 1;
+    if (!$includeUnapproved) {
+      return $week;
+    }
+  }
+
+  $dayHours = $week['dayHours'];
+  $week['validationLines'][] = $line;
+
+  $workType = (string) ($line['Work_Type_Code'] ?? '');
+
+  for ($i = 1; $i <= 7; $i++) {
+    if ($workType === 'SOT125')
+      $week['p285'] += $line["Field{$i}"] * 60;
+    else if ($workType === 'SOT150')
+      $week['p47'] += $line["Field{$i}"] * 60;
+    else if ($workType === 'SOT200')
+      $week['p85'] += $line["Field{$i}"] * 60;
+    else
+      $dayHours[$i - 1] = ($dayHours[$i - 1] ?? 0) + (float) ($line["Field{$i}"] ?? 0);
+  }
+
+  $week['dayHours'] = $dayHours;
+
+  if (in_array($workType, $codesOnkosten, true)) {
+    $week['onkosten'] += (float) ($line['Total_Quantity'] ?? 0);
+    return $week;
+  }
+  if (in_array($workType, $codesVerlet, true)) {
+    $week['verlet'] += (float) ($line['Total_Quantity'] ?? 0);
+    return $week;
+  }
+
+  if (!work_type_is_overtime($workType) && $workType !== 'KM') {
+    $normalHours = (float) ($week['normalHours'] ?? 0);
+    $normalDayHours = $week['normalDayHours'] ?? [0, 0, 0, 0, 0, 0, 0];
+    for ($i = 1; $i <= 7; $i++) {
+      $hours = (float) ($line["Field{$i}"] ?? 0);
+      $normalHours += $hours;
+      $normalDayHours[$i - 1] = ($normalDayHours[$i - 1] ?? 0) + $hours;
+    }
+    $week['normalHours'] = $normalHours;
+    $week['normalDayHours'] = $normalDayHours;
+  }
+
+  $week['lines']++;
+
+  return $week;
+}

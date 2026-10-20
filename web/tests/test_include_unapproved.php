@@ -239,11 +239,72 @@ $inspectionOff = timesheet_inspection_lines_as_counted($mixed, false);
 test_assert('weekinspectie uit is ongewijzigd', $inspectionOff === $mixed);
 $inspectionOn = timesheet_inspection_lines_as_counted($mixed, true);
 test_assert(
-    'weekinspectie aan behandelt status als Approved',
-    ($inspectionOn[1]['Status'] ?? '') === 'Approved'
-        && ($inspectionOn[2]['Status'] ?? '') === 'Approved'
+    'weekinspectie aan bewaart de BC-status en zet alleen de telvlag',
+    ($inspectionOn[0]['Status'] ?? '') === 'Approved'
+        && ($inspectionOn[0]['original_status'] ?? '') === 'Approved'
+        && !empty($inspectionOn[0]['treated_as_approved'])
+        && ($inspectionOn[1]['Status'] ?? '') === 'Open'
+        && ($inspectionOn[1]['original_status'] ?? '') === 'Open'
+        && !empty($inspectionOn[1]['treated_as_approved'])
+        && ($inspectionOn[2]['Status'] ?? '') === 'Rejected'
+        && ($inspectionOn[2]['original_status'] ?? '') === 'Rejected'
         && ($inspectionOn[1]['Field1'] ?? 0) === 2.0
         && ($mixed[1]['Status'] ?? '') === 'Open'
+        && !array_key_exists('original_status', $mixed[1])
+);
+test_assert(
+    'mix: Approved blijft zichtbaar en zonder oranje',
+    timesheet_line_display_status($inspectionOn[0]) === 'Approved'
+        && timesheet_line_highlight_class($inspectionOn[0], true) === ''
+        && timesheet_line_highlight_row_attr($inspectionOn[0], true) === ''
+);
+test_assert(
+    'mix: Open en Rejected blijven hun status en zijn oranje',
+    timesheet_line_display_status($inspectionOn[1]) === 'Open'
+        && timesheet_line_display_status($inspectionOn[2]) === 'Rejected'
+        && timesheet_line_highlight_class($inspectionOn[1], true) === 'counted-unapproved'
+        && timesheet_line_highlight_class($inspectionOn[2], true) === 'counted-unapproved'
+        && timesheet_line_highlight_class($inspectionOn[1], false) === ''
+        && timesheet_line_highlight_row_attr($inspectionOn[1], true) === ' class="counted-unapproved"'
+);
+$overwritten = test_line('Approved', 'SNT', [1 => 3]);
+$overwritten['original_status'] = 'Open';
+$overwritten['treated_as_approved'] = true;
+test_assert(
+    'overschreven Status toont origineel en telt niet als echt Approved',
+    timesheet_line_display_status($overwritten) === 'Open'
+        && timesheet_line_counts_as_approved($overwritten, false) === false
+        && timesheet_line_highlight_class($overwritten, true) === 'counted-unapproved'
+        && timesheet_line_passes_approved_only_filter($overwritten)
+);
+$reallyApproved = test_line('Approved', 'SNT', [1 => 8]);
+$reallyApproved['original_status'] = 'Approved';
+$reallyApproved['treated_as_approved'] = true;
+test_assert(
+    'echte Approved met telvlag is niet oranje',
+    timesheet_line_display_status($reallyApproved) === 'Approved'
+        && timesheet_line_highlight_class($reallyApproved, true) === ''
+        && timesheet_line_counts_as_approved($reallyApproved, false)
+);
+$mixWeek = test_blank_week();
+foreach ($mixed as $mixLine) {
+    $mixWeek = timesheet_overview_apply_line($mixWeek, $mixLine, true, $codesOnkosten, $codesVerlet);
+}
+test_assert(
+    'mix-week scheidt goedgekeurd en niet-goedgekeurd',
+    !empty($mixWeek['hasApproved'])
+        && !empty($mixWeek['hasUnapproved'])
+        && (int) $mixWeek['unapprovedCount'] === 2
+        && (float) $mixWeek['normalHours'] === 10.0
+        && test_salary_hours($mixWeek)['h285'] === 1.0
+        && timesheet_counted_unapproved_row_attr(true, !empty($mixWeek['hasUnapproved'])) === ' class="counted-unapproved"'
+);
+$approvedOnlyWeek = timesheet_overview_apply_line(test_blank_week(), $mixed[0], true, $codesOnkosten, $codesVerlet);
+test_assert(
+    'alleen-Approved week is niet oranje',
+    !empty($approvedOnlyWeek['hasApproved'])
+        && empty($approvedOnlyWeek['hasUnapproved'])
+        && timesheet_counted_unapproved_row_attr(true, !empty($approvedOnlyWeek['hasUnapproved'])) === ''
 );
 $totalsOff = detect_hour_entry_issues($inspectionOff);
 $totalsDirect = detect_hour_entry_issues($mixed);
@@ -342,8 +403,17 @@ test_assert('weekinspectie telt met dezelfde stand', str_contains($weekinspectie
 test_assert(
     'weekinspectie markeert niet-goedgekeurde regels',
     str_contains($weekinspectie, 'timesheet_line_highlight_row_attr($l, $includeUnapproved)')
+        && str_contains($weekinspectie, 'timesheet_line_display_status($l)')
+        && str_contains($weekinspectie, 'foreach ($displayLines as $l)')
         && str_contains($weekinspectie, 'tr.counted-unapproved > td')
         && str_contains($weekinspectie, 'background-color: #ffb347')
+);
+$lib = (string) file_get_contents($root . '/lib_times.php');
+test_assert(
+    'BC-status wordt niet overschreven naar Approved',
+    !str_contains($lib, "\$line['Status'] = 'Approved'")
+        && str_contains($lib, "\$line['original_status']")
+        && str_contains($lib, "\$line['treated_as_approved']")
 );
 test_assert('weekinspectie geeft de stand door', str_contains($weekinspectie, 'timesheet_include_unapproved_query_suffix($includeUnapproved)'));
 test_assert('onkosten leest de stand', str_contains($onkosten, 'timesheet_include_unapproved_from_request('));

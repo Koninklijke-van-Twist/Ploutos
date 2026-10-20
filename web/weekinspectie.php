@@ -69,7 +69,8 @@ $lines = array_values(array_filter($linesAll, function ($l) use ($resourceNo) {
     return (string) ($l['Header_Resource_No'] ?? '') === $resourceNo;
 }));
 
-$hourIssueData = detect_hour_entry_issues(timesheet_inspection_lines_as_counted($lines, $includeUnapproved));
+$displayLines = timesheet_inspection_lines_as_counted($lines, $includeUnapproved);
+$hourIssueData = detect_hour_entry_issues($displayLines);
 $weekHasHourIssues = (bool) ($hourIssueData['hasIssues'] ?? false);
 $dayTotals = (array) ($hourIssueData['dayTotals'] ?? array_fill(0, 7, 0.0));
 $over24Days = (array) ($hourIssueData['over24Days'] ?? array_fill(0, 7, false));
@@ -489,7 +490,7 @@ function dayIsHoliday($i)
                 </thead>
                 <tbody>
 
-                    <?php foreach ($lines as $l): ?>
+                    <?php foreach ($displayLines as $l): ?>
                         <tr<?= timesheet_line_highlight_row_attr($l, $includeUnapproved) ?>>
                             <td>
                                 <?= $l['Time_Sheet_No'] . "-" . ((int) ($l['Line_No'] ?? 0)) ?>
@@ -507,7 +508,7 @@ function dayIsHoliday($i)
                                 <?= htmlspecialchars((string) ($l['Job_Task_No'] ?? '')) ?>
                             </td>
                             <td class="<?php
-                            $status = (string) ($l['Status'] ?? '');
+                            $status = timesheet_line_display_status($l);
                             if ($status === "Open")
                                 echo "openStatus";
                             elseif ($status === "Submitted")

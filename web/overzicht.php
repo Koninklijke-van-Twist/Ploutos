@@ -123,13 +123,7 @@ function csv_decimal_quarters(float $h): string
 
 function timesheet_status_class(string $status): string
 {
-    return match ($status) {
-        'Open' => 'openStatus',
-        'Submitted' => 'submittedStatus',
-        'Rejected' => 'rejectedStatus',
-        'Approved' => 'approvedStatus',
-        default => '',
-    };
+    return timesheet_status_css_class($status);
 }
 
 function issue_filter_definitions(): array

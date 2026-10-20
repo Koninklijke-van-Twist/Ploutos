@@ -507,17 +507,8 @@ function dayIsHoliday($i)
                             <td>
                                 <?= htmlspecialchars((string) ($l['Job_Task_No'] ?? '')) ?>
                             </td>
-                            <td class="<?php
-                            $status = timesheet_line_display_status($l);
-                            if ($status === "Open")
-                                echo "openStatus";
-                            elseif ($status === "Submitted")
-                                echo "submittedStatus";
-                            elseif ($status === "Rejected")
-                                echo "rejectedStatus";
-                            elseif ($status === "Approved")
-                                echo "approvedStatus";
-                            ?>">
+                            <?php $status = timesheet_line_display_status($l); ?>
+                            <td class="<?= htmlspecialchars(timesheet_status_css_class($status)) ?>">
                                 <?= htmlspecialchars($status) ?>
                             </td>
                             <?php for ($i = 1; $i <= 7; $i++):

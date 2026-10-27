@@ -14,8 +14,8 @@ $check = function (string $label, $got, $want) use (&$fail) {
         echo "FAIL {$label}: " . json_encode($got) . ' != ' . json_encode($want) . "\n";
     }
 };
-$check('oktober', timesheet_sync_refresh_months('2026-10'), ['2026-10', '2026-09', '2026-08']);
-$check('jaarwissel', timesheet_sync_refresh_months('2027-01'), ['2027-01', '2026-12', '2026-11']);
+$check('oktober', timesheet_sync_refresh_months('2026-10'), ['2026-10', '2026-09', '2026-08', '2026-07', '2026-06', '2026-05']);
+$check('jaarwissel', timesheet_sync_refresh_months('2027-01'), ['2027-01', '2026-12', '2026-11', '2026-10', '2026-09', '2026-08']);
 $check('alleen huidig', timesheet_sync_refresh_months('2026-10', 0), ['2026-10']);
 echo $fail ? "{$fail} fout(en)\n" : "OK\n";
 exit($fail ? 1 : 0);

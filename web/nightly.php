@@ -68,7 +68,7 @@ try {
     $db = timesheet_store_db();
     $ttl = 3600 * 24;
 
-    nightly_log('Stap 1/3: huidige en vorige ' . TIMESHEET_SYNC_REFRESH_PREVIOUS_MONTHS . ' maanden verversen uit OData.');
+    nightly_log('Stap 1/3: laatste ' . (TIMESHEET_SYNC_REFRESH_PREVIOUS_MONTHS + 1) . ' maanden (huidige + ' . TIMESHEET_SYNC_REFRESH_PREVIOUS_MONTHS . ' vorige) verversen uit OData.');
     $live = timesheet_sync_live_month($db, $base, $auth, $ttl, 'nightly_log');
     nightly_log('Live-maand klaar: ' . (int) $live['timesheets'] . ' urenstaten, ' . (int) $live['lines'] . ' regels.');
 

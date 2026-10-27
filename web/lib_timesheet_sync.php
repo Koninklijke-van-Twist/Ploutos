@@ -337,7 +337,7 @@ function timesheet_sync_month(SQLite3 $db, string $base, array $auth, string $ym
  * Urenstaten worden vaak pas na de maandwissel ingevuld of goedgekeurd; zonder
  * herhaalde sync bleven die weken voorgoed ontbreken in de cache.
  */
-const TIMESHEET_SYNC_REFRESH_PREVIOUS_MONTHS = 2;
+const TIMESHEET_SYNC_REFRESH_PREVIOUS_MONTHS = 5; // huidige + 5 = laatste 6 maanden
 
 function timesheet_sync_refresh_months(string $currentYm, int $previousMonths = TIMESHEET_SYNC_REFRESH_PREVIOUS_MONTHS): array
 {

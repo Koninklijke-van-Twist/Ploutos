@@ -4,6 +4,8 @@ OData-reads gaan via Mímir als `$mimirApi` in `web/auth.php` staat. Faalt die a
 
 Dit geldt voor live pagina's (waaronder `overzicht.php`) en voor `nightly.php` (CLI via `php nightly.php`, en cron). Zonder `$mimirApi` blijft alleen het directe BC-pad actief.
 
+`nightly.php` ververst elke nacht de laatste 6 maanden (huidige + 5 vorige, `TIMESHEET_SYNC_REFRESH_PREVIOUS_MONTHS`), zodat laat ingevulde of goedgekeurde urenstaten alsnog in de cache komen.
+
 `web/analytics/analytics.sqlite` (en `*.sqlite-*`) blijft op de server staan bij een deploy: de FTP-mirror slaat die bestanden al over. Dezelfde mirror slaat `.htaccess` over, dus een gecommit bestand komt niet mee en een bestaand bestand wordt niet gewist. `analytics.php` schrijft `web/analytics/.htaccess` als die ontbreekt (of vult hem aan als het woord `sqlite` er nog niet in staat), zodat Apache de database weigert en `analytics.php` zelf bereikbaar blijft.
 
 ## Eenmalige jaarcontrole: `backfill_year.php`

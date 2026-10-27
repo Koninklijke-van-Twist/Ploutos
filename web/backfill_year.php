@@ -42,6 +42,9 @@ function backfill_lock()
     return $lock;
 }
 
+/** Ophogen bij elke wijziging van het tijdelijke run-formaat; oude runs beginnen dan opnieuw. */
+const BACKFILL_STATE_VERSION = 2;
+
 function backfill_state_path(string $run): string
 {
     // Buiten de webroot: web/cache is via de webserver op te vragen.
@@ -160,7 +163,7 @@ $page = function (string $body, string $refresh = '') use ($h, $companyLabel): v
     echo '<!doctype html><html lang="nl"><head><meta charset="utf-8"><title>Ploutos – jaar controleren</title>'
         . ($refresh !== '' ? '<meta http-equiv="refresh" content="1;url=' . $h($refresh) . '">' : '')
         . '<style>body{font-family:sans-serif;margin:24px}table{border-collapse:collapse}td,th{border:1px solid #ccc;padding:4px 8px;font-size:13px}'
-        . '.ontbreekt{background:#fde2e2}.verschilt{background:#fff4d6}</style></head><body>'
+        . 'th.ts{background:#eee;text-align:left}.chg{background:#fff200}.leeg{color:#999;font-style:italic}.sep{border-left:3px solid #333}</style></head><body>'
         . '<h1>Urenstaten-cache controleren</h1><p>Bedrijf: <b>' . $h($companyLabel) . '</b></p>' . $body . '</body></html>';
     exit;
 };
@@ -172,6 +175,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $page('<p>Ongeldig of verlopen verzoek. <a href="backfill_year.php">Opnieuw beginnen</a>.</p>');
     }
     $state = json_decode((string) file_get_contents(backfill_state_path($run)), true);
+    if (($state['v'] ?? 0) !== BACKFILL_STATE_VERSION) {
+        @unlink(backfill_state_path($run));
+        $page('<p>Deze run is met een oudere versie gemaakt. <a href="backfill_year.php">Opnieuw beginnen</a>.</p>');
+    }
     $lock = backfill_lock();
     if (!$lock) {
         $page('<p>Nightly draait nu; probeer het over een paar minuten opnieuw (de vergelijking blijft bewaard).</p>');
@@ -184,7 +191,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 // Nieuwe run starten
 if ($run === '') {
     $run = bin2hex(random_bytes(8));
-    file_put_contents(backfill_state_path($run), json_encode(['months' => $months, 'idx' => 0, 'results' => []]));
+    file_put_contents(backfill_state_path($run), json_encode(['v' => BACKFILL_STATE_VERSION, 'months' => $months, 'idx' => 0, 'results' => []]));
     $page('<p>Vergelijking gestart voor ' . $h(reset($months)) . ' t/m ' . $h(end($months)) . '…</p>', 'backfill_year.php?run=' . $run);
 }
 
@@ -192,6 +199,10 @@ if (!is_file(backfill_state_path($run))) {
     $page('<p>Deze run bestaat niet (meer). <a href="backfill_year.php">Opnieuw beginnen</a>.</p>');
 }
 $state = json_decode((string) file_get_contents(backfill_state_path($run)), true);
+if (($state['v'] ?? 0) !== BACKFILL_STATE_VERSION) {
+    @unlink(backfill_state_path($run));
+    $page('<p>Deze run is met een oudere versie gestart en wordt opnieuw begonnen…</p>', 'backfill_year.php');
+}
 $months = (array) $state['months'];
 $idx = (int) $state['idx'];
 
@@ -221,14 +232,39 @@ if (!$diffs) {
     @unlink(backfill_state_path($run));
     $page('<p>Geen verschillen gevonden tussen BC en de cache voor ' . $h(reset($months)) . ' t/m ' . $h(end($months)) . '.</p>');
 }
+$cols = ['Type' => 'Type', 'Status' => 'Status', 'Job_No' => 'Project', 'Job_Task_No' => 'Taak', 'Work_Type_Code' => 'Werksoort',
+    'Cause_of_Absence_Code' => 'Afwezig', 'Description' => 'Omschrijving', 'Field1' => 'Ma', 'Field2' => 'Di', 'Field3' => 'Wo',
+    'Field4' => 'Do', 'Field5' => 'Vr', 'Field6' => 'Za', 'Field7' => 'Zo', 'Total_Quantity' => 'Totaal'];
+$side = function (?array $line, array $changed, string $missing, bool $first) use ($cols, $h): string {
+    if ($line === null) {
+        return '<td colspan="' . count($cols) . '" class="leeg' . ($first ? ' sep' : '') . '">' . $h($missing) . '</td>';
+    }
+    $out = '';
+    foreach (array_keys($cols) as $i => $f) {
+        $cls = trim((in_array($f, $changed, true) ? 'chg' : '') . ($first && $i === 0 ? ' sep' : ''));
+        $out .= '<td' . ($cls !== '' ? ' class="' . $cls . '"' : '') . '>' . $h($line[$f] ?? '') . '</td>';
+    }
+    return $out;
+};
+$head = '';
+foreach ($cols as $label) {
+    $head .= '<th>' . $h($label) . '</th>';
+}
+$width = 1 + 2 * count($cols);
 $rows = '';
 foreach ($diffs as $d) {
-    $rows .= '<tr class="' . $h($d['kind']) . '"><td>' . $h($d['kind']) . '</td><td>' . $h($d['resourceName']) . ' (' . $h($d['resourceNo']) . ')</td><td>'
-        . $h($d['weekStart']) . ' ' . $h($d['description']) . '</td><td>' . $h($d['tsNo']) . '</td><td>' . number_format($d['bcHours'], 2, ',', '') . '</td><td>'
-        . $h($d['bcStatus']) . '</td><td>' . number_format($d['cacheHours'], 2, ',', '') . '</td><td>' . $h($d['cacheStatus'] ?: '-') . '</td></tr>';
+    $rows .= '<tr><th class="ts" colspan="' . $width . '">' . $h($d['resourceName']) . ' (' . $h($d['resourceNo']) . ') – week ' . $h($d['weekStart'])
+        . ' – ' . $h($d['tsNo']) . ' – ' . $h($d['kind']) . ' – Ploutos ' . number_format($d['cacheHours'], 2, ',', '') . ' u, BC '
+        . number_format($d['bcHours'], 2, ',', '') . ' u</th></tr>';
+    foreach ((array) ($d['lines'] ?? []) as $l) {
+        $changed = (array) $l['changed'];
+        $rows .= '<tr><td>' . $h($l['lineNo']) . '</td>' . $side($l['cache'], $changed, 'ontbrak in Ploutos', true)
+            . $side($l['bc'], $changed, 'alleen in Ploutos, niet (meer) in BC', true) . '</tr>';
+    }
 }
 $page('<p>' . count($diffs) . ' urenstaten wijken af (' . $h(reset($months)) . ' t/m ' . $h(end($months)) . '). Er is nog niets geschreven.</p>'
-    . '<table><tr><th>Soort</th><th>Medewerker</th><th>Week</th><th>Urenstaat</th><th>Uren BC</th><th>Status BC</th><th>Uren cache</th><th>Status cache</th></tr>'
-    . $rows . '</table><form method="post" style="margin-top:16px"><input type="hidden" name="run" value="' . $h($run) . '">'
+    . '<p>Links: Ploutos-cache, rechts: BC. Gele cellen verschillen.</p>'
+    . '<table><tr><th></th><th class="sep" colspan="' . count($cols) . '">Ploutos (cache)</th><th class="sep" colspan="' . count($cols) . '">BC</th></tr>'
+    . '<tr><th>Regel</th>' . $head . $head . '</tr>' . $rows . '</table><form method="post" style="margin-top:16px"><input type="hidden" name="run" value="' . $h($run) . '">'
     . '<input type="hidden" name="csrf" value="' . $h($csrf) . '"><button type="submit">Toevoegen</button> '
     . '<a href="index.php">Annuleren</a></form>');

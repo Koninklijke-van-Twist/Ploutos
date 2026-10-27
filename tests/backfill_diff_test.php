@@ -24,6 +24,14 @@ $check('ontbreekt', [$d[0]['tsNo'], $d[0]['kind'], $d[0]['bcHours'], $d[0]['cach
 $check('verschilt', [$d[1]['tsNo'], $d[1]['kind'], $d[1]['bcStatus'], $d[1]['cacheStatus']], ['TS3', 'verschilt', 'Approved: 1', 'Submitted: 1']);
 $check('gelijk', timesheet_backfill_diff($cacheTs, $cacheLines, $cacheTs, $cacheLines), []);
 $check('header zonder regels in cache', timesheet_backfill_diff([$ts('TS1', 'x')], [$line('TS1', 1, 1.0)], [$ts('TS1', 'x')], [])[0]['kind'], 'ontbreekt');
+// BC levert status soms NL, soms EN: geen vals verschil (oorzaak 304/332 in feb 2026)
+$check('status taal', timesheet_backfill_diff($cacheTs, [$line('TS1', 10000, 8.0, 'Goedgekeurd'), $line('TS3', 10000, 8.0, 'Ingediend')], $cacheTs, $cacheLines), []);
+$check('getal als string', timesheet_backfill_diff([$ts('TS1', 'x')], [$line('TS1', 10000, 8)], [$ts('TS1', 'x')], [$line('TS1', 10000, '8.0')]), []);
+// Regels naast elkaar
+$r = timesheet_backfill_diff([$ts('TS1', 'x')], [$line('TS1', 10000, 9.0), $line('TS1', 20000, 1.0)], [$ts('TS1', 'x')], [$line('TS1', 10000, 8.0), $line('TS1', 30000, 2.0)])[0]['lines'];
+$check('regels', array_map(fn($l) => [$l['lineNo'], $l['cache'] !== null, $l['bc'] !== null], $r), [[10000, true, true], [20000, false, true], [30000, true, false]]);
+$check('gewijzigde cellen', $r[0]['changed'], ['Total_Quantity']);
+$check('ongewijzigde regel weggelaten', count(timesheet_backfill_diff([$ts('TS1', 'x')], [$line('TS1', 1, 1.0), $line('TS1', 2, 5.0)], [$ts('TS1', 'x')], [$line('TS1', 1, 1.0), $line('TS1', 2, 4.0)])[0]['lines']), 1);
 $check('12 maanden', timesheet_backfill_months(null, '2026-10'), ['2025-11', '2025-12', '2026-01', '2026-02', '2026-03', '2026-04', '2026-05', '2026-06', '2026-07', '2026-08', '2026-09', '2026-10']);
 $check('jaar', count(timesheet_backfill_months(2025, '2026-10')), 12);
 $m = timesheet_backfill_months(2026, "2026-10");

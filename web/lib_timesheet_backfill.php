@@ -3,6 +3,8 @@
  * Vergelijking BC ↔ lokale cache voor backfill_year.php (zuivere functies, testbaar).
  */
 
+require_once __DIR__ . '/lib_times.php'; // timesheet_normalize_status
+
 /** Maanden (Y-m) voor een kalenderjaar, of de laatste 12 maanden t/m $currentYm. */
 function timesheet_backfill_months(?int $year, string $currentYm): array
 {
@@ -24,16 +26,35 @@ function timesheet_backfill_months(?int $year, string $currentYm): array
     return $months;
 }
 
-/** Vergelijkbare sleutel van een regel: velden zoals de cache ze opslaat. */
-function timesheet_backfill_line_signature(array $line): string
+/** Velden die de cache opslaat en die in het rapport per regel vergeleken worden. */
+const TIMESHEET_BACKFILL_LINE_FIELDS = ['Type', 'Status', 'Job_No', 'Job_Task_No', 'Work_Type_Code', 'Cause_of_Absence_Code',
+    'Description', 'Field1', 'Field2', 'Field3', 'Field4', 'Field5', 'Field6', 'Field7', 'Total_Quantity'];
+
+/**
+ * Waarde zoals de cache hem opslaat, voor vergelijking. Status gaat via
+ * timesheet_normalize_status: BC levert die soms Engels, soms Nederlands.
+ */
+function timesheet_backfill_norm(string $field, $value): string
 {
-    $parts = [(string) ($line['Header_Resource_No'] ?? ''), (string) ($line['Type'] ?? ''), (string) ($line['Status'] ?? ''),
-        (string) ($line['Job_No'] ?? ''), (string) ($line['Job_Task_No'] ?? ''), (string) ($line['Work_Type_Code'] ?? ''),
-        (string) ($line['Cause_of_Absence_Code'] ?? ''), (string) ($line['Description'] ?? '')];
-    foreach (['Field1', 'Field2', 'Field3', 'Field4', 'Field5', 'Field6', 'Field7', 'Total_Quantity'] as $f) {
-        $parts[] = number_format((float) ($line[$f] ?? 0), 4, '.', '');
+    if ($field === 'Status') {
+        return timesheet_normalize_status((string) $value);
     }
-    return implode('|', $parts);
+    if ($field === 'Total_Quantity' || preg_match('/^Field\d$/', $field)) {
+        return number_format((float) $value, 4, '.', '');
+    }
+    return (string) $value;
+}
+
+/** Namen van velden die tussen cache- en BC-regel verschillen. */
+function timesheet_backfill_changed_fields(array $cache, array $bc): array
+{
+    $changed = [];
+    foreach (TIMESHEET_BACKFILL_LINE_FIELDS as $f) {
+        if (timesheet_backfill_norm($f, $cache[$f] ?? '') !== timesheet_backfill_norm($f, $bc[$f] ?? '')) {
+            $changed[] = $f;
+        }
+    }
+    return $changed;
 }
 
 function timesheet_backfill_status_summary(array $lines): string
@@ -53,6 +74,7 @@ function timesheet_backfill_status_summary(array $lines): string
 
 /**
  * Per urenstaat: 'ontbreekt' (niet of zonder regels in cache) of 'verschilt' (regels anders).
+ * 'lines': per regelnummer cache (null = ontbrak in Ploutos), bc (null = alleen in cache) en changed-velden.
  * @return array<int,array<string,mixed>>
  */
 function timesheet_backfill_diff(array $bcTimesheets, array $bcLines, array $cacheTimesheets, array $cacheLines): array
@@ -81,26 +103,25 @@ function timesheet_backfill_diff(array $bcTimesheets, array $bcLines, array $cac
         if ($no === '' || !$bc) {
             continue; // lege urenstaat in BC: niets te tonen
         }
-        $cache = $cacheByTs[$no] ?? [];
-        if (!isset($cacheTsNos[$no]) || !$cache) {
-            $kind = 'ontbreekt';
-        } else {
-            $same = count($bc) === count($cache);
-            foreach ($bc as $lineNo => $l) {
-                if (!$same) {
-                    break;
-                }
-                $same = isset($cache[$lineNo]) && timesheet_backfill_line_signature($l) === timesheet_backfill_line_signature($cache[$lineNo]);
+        $cache = isset($cacheTsNos[$no]) ? ($cacheByTs[$no] ?? []) : [];
+        $lineNos = array_unique(array_merge(array_keys($cache), array_keys($bc)));
+        sort($lineNos);
+        $lineDiffs = [];
+        foreach ($lineNos as $ln) {
+            $c = $cache[$ln] ?? null;
+            $b = $bc[$ln] ?? null;
+            $changed = ($c && $b) ? timesheet_backfill_changed_fields($c, $b) : TIMESHEET_BACKFILL_LINE_FIELDS;
+            if ($changed) {
+                $lineDiffs[] = ['lineNo' => $ln, 'cache' => $c, 'bc' => $b, 'changed' => $changed];
             }
-            if ($same) {
-                continue;
-            }
-            $kind = 'verschilt';
+        }
+        if (!$lineDiffs) {
+            continue;
         }
         $sum = fn(array $ls) => array_sum(array_map(fn($l) => (float) ($l['Total_Quantity'] ?? 0), $ls));
         $diffs[] = [
             'tsNo' => $no,
-            'kind' => $kind,
+            'kind' => $cache ? 'verschilt' : 'ontbreekt',
             'resourceNo' => (string) ($ts['Resource_No'] ?? ''),
             'resourceName' => (string) ($ts['Resource_Name'] ?? ''),
             'weekStart' => (string) ($ts['Starting_Date'] ?? ''),
@@ -109,6 +130,7 @@ function timesheet_backfill_diff(array $bcTimesheets, array $bcLines, array $cac
             'cacheHours' => $sum($cache),
             'bcStatus' => timesheet_backfill_status_summary($bc),
             'cacheStatus' => timesheet_backfill_status_summary($cache),
+            'lines' => $lineDiffs,
         ];
     }
     usort($diffs, fn($a, $b) => [$a['resourceName'], $a['weekStart']] <=> [$b['resourceName'], $b['weekStart']]);

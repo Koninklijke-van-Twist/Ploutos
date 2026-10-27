@@ -3,10 +3,10 @@
 /**
  * Niet-goedgekeurde urenstaten tellen alleen mee als includeUnapproved=1.
  * Uit houdt het huidige gedrag: alleen Status Approved.
- * Run: php web/tests/test_include_unapproved.php
+ * Run: php tests/test_include_unapproved.php
  */
 
-require_once dirname(__DIR__) . '/lib_times.php';
+require_once dirname(__DIR__) . '/web' . '/lib_times.php';
 
 $failures = 0;
 
@@ -435,7 +435,7 @@ test_assert(
         && timesheet_line_display_status(test_line('Ingediend', 'SNT')) === 'Ingediend'
 );
 
-$root = dirname(__DIR__);
+$root = dirname(__DIR__) . '/web';
 $overzicht = (string) file_get_contents($root . '/overzicht.php');
 $weekinspectie = (string) file_get_contents($root . '/weekinspectie.php');
 $onkosten = (string) file_get_contents($root . '/onkosten_editor.php');

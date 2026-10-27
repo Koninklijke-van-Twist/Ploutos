@@ -1,13 +1,13 @@
 <?php
 /**
- * Mappen met server-data (SQLite-caches, OData-cache, locks, feestdagen-JSON,
- * testscripts) mogen nooit via de webserver op te vragen zijn. De FTP-deploy
+ * Mappen met server-data (SQLite-caches, OData-cache, locks, feestdagen-JSON)
+ * mogen nooit via de webserver op te vragen zijn. De FTP-deploy
  * slaat .htaccess over, dus de app schrijft de afscherming zelf (zoals
  * analytics.php). Idempotent: alleen schrijven als het bestand ontbreekt of
  * de regel nog niet bevat.
  */
 
-const PLOUTOS_PROTECTED_DIRS = ['cache', 'feestdagen', 'tests'];
+const PLOUTOS_PROTECTED_DIRS = ['cache', 'feestdagen'];
 
 function ploutos_deny_all_rules(): string
 {

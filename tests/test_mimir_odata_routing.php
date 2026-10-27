@@ -2,16 +2,16 @@
 
 /**
  * OData-routing: Mímir als $mimirApi gezet is, BC als de key ontbreekt.
- * Run: php web/tests/test_mimir_odata_routing.php
+ * Run: php tests/test_mimir_odata_routing.php
  */
 
-require_once dirname(__DIR__) . '/odata.php';
+require_once dirname(__DIR__) . '/web' . '/odata.php';
 
 $failures = 0;
 $mockPort = 18941;
 $mockLog = sys_get_temp_dir() . '/ploutos-mimir-mock.log';
 $mockScript = sys_get_temp_dir() . '/ploutos-mimir-mock.php';
-$authPath = dirname(__DIR__) . '/auth.php';
+$authPath = dirname(__DIR__) . '/web' . '/auth.php';
 $authBackup = null;
 
 function test_assert(string $name, bool $condition, string $detail = ''): void
@@ -149,7 +149,7 @@ function test_mock_requests(): array
 
 function test_cache_files(): array
 {
-    $paths = glob(dirname(__DIR__) . '/cache/odata/*.json');
+    $paths = glob(dirname(__DIR__) . '/web' . '/cache/odata/*.json');
     return is_array($paths) ? $paths : [];
 }
 

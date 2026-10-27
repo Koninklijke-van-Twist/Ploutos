@@ -1,5 +1,8 @@
 <?php
 
+require_once __DIR__ . '/lib_server_dirs.php';
+ploutos_protect_server_dirs();
+
 function is_trusted_requester(): bool
 {
     $remote = $_SERVER['REMOTE_ADDR'] ?? '';

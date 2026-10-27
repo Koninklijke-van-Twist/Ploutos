@@ -332,11 +332,35 @@ function timesheet_sync_month(SQLite3 $db, string $base, array $auth, string $ym
     ];
 }
 
+/**
+ * Aantal afgesloten maanden vóór de huidige maand dat nightly opnieuw ophaalt.
+ * Urenstaten worden vaak pas na de maandwissel ingevuld of goedgekeurd; zonder
+ * herhaalde sync bleven die weken voorgoed ontbreken in de cache.
+ */
+const TIMESHEET_SYNC_REFRESH_PREVIOUS_MONTHS = 2;
+
+function timesheet_sync_refresh_months(string $currentYm, int $previousMonths = TIMESHEET_SYNC_REFRESH_PREVIOUS_MONTHS): array
+{
+    $months = [$currentYm];
+    $ym = $currentYm;
+    for ($i = 0; $i < $previousMonths; $i++) {
+        $ym = timesheet_store_previous_month($ym);
+        $months[] = $ym;
+    }
+    return $months;
+}
+
 function timesheet_sync_live_month(SQLite3 $db, string $base, array $auth, int $ttl, callable $log): array
 {
-    $ym = timesheet_store_current_month();
-    $log("Live-maand verversen: {$ym}");
-    return timesheet_sync_month($db, $base, $auth, $ym, $ttl, true, $log);
+    $totals = ['timesheets' => 0, 'lines' => 0, 'has_lines' => false];
+    foreach (timesheet_sync_refresh_months(timesheet_store_current_month()) as $ym) {
+        $log("Maand verversen: {$ym}");
+        $stats = timesheet_sync_month($db, $base, $auth, $ym, $ttl, true, $log);
+        $totals['timesheets'] += (int) $stats['timesheets'];
+        $totals['lines'] += (int) $stats['lines'];
+        $totals['has_lines'] = $totals['has_lines'] || !empty($stats['has_lines']);
+    }
+    return $totals;
 }
 
 function timesheet_sync_backfill(SQLite3 $db, string $base, array $auth, int $ttl, callable $log, int $emptyStop = 5): void

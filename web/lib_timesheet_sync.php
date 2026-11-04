@@ -28,17 +28,39 @@ function timesheet_sync_fetch_timesheets(string $base, array $auth, string $from
 
 function timesheet_sync_fetch_lines(string $base, array $auth, array $tsNos, int $ttl, bool $forceRefresh): array
 {
-    return odata_fetch_by_or_filter(
-        $base,
-        'Urenstaatregels',
-        timesheet_sync_line_select(),
-        'Time_Sheet_No',
-        $tsNos,
-        $auth,
-        $ttl,
-        40,
-        $forceRefresh
-    );
+    $rows = [];
+    // Per batch: BC geeft op een lege selectie geen lege lijst maar een dialoogfout
+    // ("Er zijn geen urenstaatregels om weer te geven"); dat is gewoon 0 regels.
+    foreach (array_chunk(array_values($tsNos), 40) as $chunk) {
+        try {
+            $chunkRows = odata_fetch_by_or_filter(
+                $base,
+                'Urenstaatregels',
+                timesheet_sync_line_select(),
+                'Time_Sheet_No',
+                $chunk,
+                $auth,
+                $ttl,
+                40,
+                $forceRefresh
+            );
+        } catch (Exception $e) {
+            if (!timesheet_sync_is_no_lines_error($e->getMessage())) {
+                throw $e;
+            }
+            $chunkRows = [];
+        }
+        foreach ($chunkRows as $row) {
+            $rows[] = $row;
+        }
+    }
+    return $rows;
+}
+
+function timesheet_sync_is_no_lines_error(string $message): bool
+{
+    return stripos($message, 'Application_DialogException') !== false
+        && stripos($message, 'geen urenstaatregels') !== false;
 }
 
 function timesheet_sync_fetch_resources(string $base, array $auth, array $resourceNos, int $ttl, bool $forceRefresh): array
